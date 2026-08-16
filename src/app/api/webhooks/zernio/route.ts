@@ -4,6 +4,8 @@ import { generateWhatsAppReply } from "@/lib/ai/generate-whatsapp-reply";
 import { handleIncomingMessage } from "@/lib/conversations/handle-incoming-message";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
 import { logProcessingEvent } from "@/lib/observability/safe-log";
+import { NextfitClient } from "@/lib/nextfit/client";
+import { createNextfitEnricher } from "@/lib/nextfit/sync-customer";
 import { ZernioWhatsAppProvider } from "@/lib/whatsapp/zernio-provider";
 import {
   parseZernioWebhook,
@@ -60,6 +62,8 @@ export async function POST(request: Request) {
   after(async () => {
     try {
       const provider = new ZernioWhatsAppProvider(apiKey);
+      const repository = new NeonConversationRepository();
+      const nextfitApiKey = process.env.NEXTFIT_API_KEY;
       const result = await handleIncomingMessage({
         accountId: message.accountId,
         providerConversationId: message.conversationId,
@@ -67,9 +71,10 @@ export async function POST(request: Request) {
         providerMessageId: message.messageId,
         phoneNumber: message.sender.phoneNumber ?? message.sender.id,
         text: message.text,
-        repository: new NeonConversationRepository(),
+        repository,
         provider,
         generateReply: generateWhatsAppReply,
+        ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey), store: repository }) } : {}),
       });
 
       logProcessingEvent("info", {

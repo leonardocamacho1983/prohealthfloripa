@@ -10,12 +10,22 @@ export type ConversationIdentity = {
   contactId: string; conversationId: string; firstName?: string; relationshipStatus: RelationshipStatus;
 };
 export type CustomerProfile = {
-  customerSince?: string; financialStatus?: string; activeContracts?: unknown;
+  customerSince?: string; dateOfBirth?: string; financialStatus?: string;
+  lastVisitAt?: string; nextVisitAt?: string; activeContracts?: unknown;
   consumedServicesSummary?: unknown; attendanceMetrics?: unknown;
+  relationshipMetrics?: unknown; syncedAt?: string;
 };
 export interface ConversationRepository {
   recordInbound(input: { phoneNumber: string; providerMessageId: string; content: string }): Promise<{ identity: ConversationIdentity; inserted: boolean }>;
   recordOutbound(input: { conversationId: string; content: string }): Promise<void>;
   getRecentMessages(conversationId: string, limit: number): Promise<ConversationMessage[]>;
   getCustomerProfile(contactId: string): Promise<CustomerProfile | undefined>;
+}
+
+export interface CustomerProfileStore {
+  getProfileSyncState(contactId: string): Promise<{ syncedAt?: string }>;
+  saveCustomerSnapshot(input: {
+    contactId: string; firstName?: string; relationshipStatus: RelationshipStatus;
+    profile: CustomerProfile & { externalCustomerId?: string; source: "nextfit" };
+  }): Promise<ConversationIdentity>;
 }

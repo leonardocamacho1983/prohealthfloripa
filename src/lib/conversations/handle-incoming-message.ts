@@ -7,12 +7,22 @@ export async function handleIncomingMessage(input: {
   accountId: string; providerConversationId: string; providerEventId: string; providerMessageId: string;
   phoneNumber: string; text: string; repository: ConversationRepository; provider: WhatsAppProvider;
   generateReply: (input: { message: string; context: CustomerContext }) => Promise<string>;
+  enrichCustomer?: (input: { identity: Awaited<ReturnType<ConversationRepository["recordInbound"]>>["identity"]; phoneNumber: string; message: string }) => Promise<Awaited<ReturnType<ConversationRepository["recordInbound"]>>["identity"]>;
 }): Promise<"duplicate" | "replied"> {
   const inbound = await input.repository.recordInbound({
     phoneNumber: normalizePhoneNumber(input.phoneNumber), providerMessageId: input.providerMessageId, content: input.text,
   });
   if (!inbound.inserted) return "duplicate";
-  const context = await buildCustomerContext(input.repository, inbound.identity);
+  let identity = inbound.identity;
+  if (input.enrichCustomer) {
+    try {
+      identity = await input.enrichCustomer({ identity, phoneNumber: normalizePhoneNumber(input.phoneNumber), message: input.text });
+    } catch (error) {
+      // Nextfit is optional enrichment: messaging must remain available on provider failure.
+      console.warn("Customer enrichment failed", { error: error instanceof Error ? error.name : "UnknownError" });
+    }
+  }
+  const context = await buildCustomerContext(input.repository, identity);
   const reply = await input.generateReply({ message: input.text, context });
   await input.provider.sendText({ accountId: input.accountId, conversationId: input.providerConversationId,
     idempotencyKey: `zernio-webhook-${input.providerEventId}`, text: reply });

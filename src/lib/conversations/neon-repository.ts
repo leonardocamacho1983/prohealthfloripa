@@ -1,10 +1,10 @@
 import { getDatabase } from "@/lib/db/neon";
-import type { ConversationMessage, ConversationRepository, CustomerProfile, RelationshipStatus } from "./types";
+import type { ConversationIdentity, ConversationMessage, ConversationRepository, CustomerProfile, CustomerProfileStore, RelationshipStatus } from "./types";
 
 type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; inserted: boolean };
-type ProfileRow = { customer_since: string | null; financial_status: string | null; active_contracts: unknown | null; consumed_services_summary: unknown | null; attendance_metrics: unknown | null };
+type ProfileRow = { customer_since: string | null; date_of_birth: string | null; financial_status: string | null; last_visit_at: Date | null; next_visit_at: Date | null; active_contracts: unknown | null; consumed_services_summary: unknown | null; attendance_metrics: unknown | null; relationship_metrics: unknown | null; synced_at: Date | null };
 
-export class NeonConversationRepository implements ConversationRepository {
+export class NeonConversationRepository implements ConversationRepository, CustomerProfileStore {
   async recordInbound(input: { phoneNumber: string; providerMessageId: string; content: string }) {
     const sql = getDatabase();
     const rows = await sql`
@@ -63,16 +63,56 @@ export class NeonConversationRepository implements ConversationRepository {
 
   async getCustomerProfile(contactId: string): Promise<CustomerProfile | undefined> {
     const sql = getDatabase();
-    const rows = await sql`SELECT customer_since, financial_status, active_contracts,
-      consumed_services_summary, attendance_metrics FROM customer_profiles WHERE contact_id=${contactId} LIMIT 1`;
+    const rows = await sql`SELECT customer_since, date_of_birth, financial_status, last_visit_at, next_visit_at,
+      active_contracts, consumed_services_summary, attendance_metrics, relationship_metrics, synced_at
+      FROM customer_profiles WHERE contact_id=${contactId} LIMIT 1`;
     const row = rows[0] as ProfileRow | undefined;
     if (!row) return undefined;
     return {
       ...(row.customer_since ? { customerSince: row.customer_since } : {}),
+      ...(row.date_of_birth ? { dateOfBirth: row.date_of_birth } : {}),
       ...(row.financial_status ? { financialStatus: row.financial_status } : {}),
+      ...(row.last_visit_at ? { lastVisitAt: new Date(row.last_visit_at).toISOString() } : {}),
+      ...(row.next_visit_at ? { nextVisitAt: new Date(row.next_visit_at).toISOString() } : {}),
       ...(row.active_contracts ? { activeContracts: row.active_contracts } : {}),
       ...(row.consumed_services_summary ? { consumedServicesSummary: row.consumed_services_summary } : {}),
       ...(row.attendance_metrics ? { attendanceMetrics: row.attendance_metrics } : {}),
+      ...(row.relationship_metrics ? { relationshipMetrics: row.relationship_metrics } : {}),
+      ...(row.synced_at ? { syncedAt: new Date(row.synced_at).toISOString() } : {}),
     };
+  }
+
+  async getProfileSyncState(contactId: string) {
+    const profile = await this.getCustomerProfile(contactId);
+    return profile?.syncedAt ? { syncedAt: profile.syncedAt } : {};
+  }
+
+  async saveCustomerSnapshot(input: { contactId: string; firstName?: string; relationshipStatus: RelationshipStatus; profile: CustomerProfile & { externalCustomerId?: string; source: "nextfit" } }): Promise<ConversationIdentity> {
+    const sql = getDatabase();
+    const p = input.profile;
+    const rows = await sql.transaction((tx) => [
+      tx`UPDATE contacts SET first_name=COALESCE(${input.firstName ?? null}, first_name), relationship_status=${input.relationshipStatus}, updated_at=now()
+         WHERE id=${input.contactId} RETURNING id, first_name, relationship_status`,
+      tx`INSERT INTO customer_profiles (contact_id, external_customer_id, source, customer_since, date_of_birth,
+           financial_status, last_visit_at, next_visit_at, active_contracts, consumed_services_summary,
+           attendance_metrics, relationship_metrics, synced_at)
+         VALUES (${input.contactId}, ${p.externalCustomerId ?? null}, ${p.source}, ${p.customerSince ?? null},
+           ${p.dateOfBirth ?? null}, ${p.financialStatus ?? null}, ${p.lastVisitAt ?? null}, ${p.nextVisitAt ?? null},
+           ${p.activeContracts ? JSON.stringify(p.activeContracts) : null}::jsonb,
+           ${p.consumedServicesSummary ? JSON.stringify(p.consumedServicesSummary) : null}::jsonb,
+           ${p.attendanceMetrics ? JSON.stringify(p.attendanceMetrics) : null}::jsonb,
+           ${p.relationshipMetrics ? JSON.stringify(p.relationshipMetrics) : null}::jsonb,
+           ${p.syncedAt ?? null})
+         ON CONFLICT (contact_id) DO UPDATE SET external_customer_id=EXCLUDED.external_customer_id, source=EXCLUDED.source,
+           customer_since=EXCLUDED.customer_since, date_of_birth=EXCLUDED.date_of_birth,
+           financial_status=EXCLUDED.financial_status, last_visit_at=EXCLUDED.last_visit_at,
+           next_visit_at=EXCLUDED.next_visit_at, active_contracts=EXCLUDED.active_contracts,
+           consumed_services_summary=EXCLUDED.consumed_services_summary, attendance_metrics=EXCLUDED.attendance_metrics,
+           relationship_metrics=EXCLUDED.relationship_metrics, synced_at=EXCLUDED.synced_at, updated_at=now()`,
+    ]);
+    const contact = rows[0][0] as { id: string; first_name: string | null; relationship_status: RelationshipStatus };
+    const conversation = await sql`SELECT id FROM conversations WHERE contact_id=${input.contactId} AND status='active' LIMIT 1` as Array<{ id: string }>;
+    return { contactId: contact.id, conversationId: conversation[0]!.id, relationshipStatus: contact.relationship_status,
+      ...(contact.first_name ? { firstName: contact.first_name } : {}) };
   }
 }
