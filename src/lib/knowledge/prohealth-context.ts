@@ -29,7 +29,8 @@ function scheduleContext(): string {
 - Pilates: ${item.agendas.pilates}.
 - Atendimento/Massagem: ${item.agendas.atendimentoMassagem}.
 - Termoterapias: ${item.agendas.termoterapias}.
-- Não afirmar funcionamento aos sábados ou domingos nem prometer disponibilidade específica.`;
+- Fim de semana: ${item.weekend}.
+- Nunca prometer disponibilidade específica sem confirmação.`;
 }
 
 function pilatesContext(): string {
@@ -39,7 +40,17 @@ function pilatesContext(): string {
 - Mensal: 1x/semana ${item.monthly.oncePerWeek}; 2x/semana ${item.monthly.twicePerWeek}; 3x/semana ${item.monthly.threeTimesPerWeek}.
 - Semestral: 1x/semana ${item.semiannual.oncePerWeek}; 2x/semana ${item.semiannual.twicePerWeek}; 3x/semana ${item.semiannual.threeTimesPerWeek}.
 - Anual: 1x/semana ${item.annual.oncePerWeek}; 2x/semana ${item.annual.twicePerWeek}; 3x/semana ${item.annual.threeTimesPerWeek}.
+- ${item.experimentalClass}
+- Congelamento anual: ${item.freezing.annual}; semestral: ${item.freezing.semiannual}.
 - ${item.recurrenceNote}`;
+}
+
+function policyContext(): string {
+  const item = knowledge.policies;
+  return `POLÍTICAS CONFIRMADAS:
+- ${item.cancellation}
+- ${item.unannouncedAbsence}
+- ${item.refund}`;
 }
 
 function massageContext(): string {
@@ -130,6 +141,7 @@ export function buildProHealthInstructions(userMessage: string): string {
   }
 
   if (message.includes("pilates")) contexts.push(pilatesContext());
+  if (includesAny(message, ["experimental", "congel", "pausar", "suspender"])) contexts.push(pilatesContext());
   if (
     includesAny(message, [
       "massag",
@@ -161,6 +173,9 @@ export function buildProHealthInstructions(userMessage: string): string {
     includesAny(message, ["duracao", "quanto tempo", "minuto", "express"])
   ) {
     contexts.push(durationContext());
+  }
+  if (includesAny(message, ["cancel", "remarc", "falta", "faltei", "reembolso", "atestado", "forca maior"])) {
+    contexts.push(policyContext());
   }
   if (
     includesAny(message, [

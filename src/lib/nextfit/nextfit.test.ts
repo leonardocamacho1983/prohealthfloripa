@@ -124,3 +124,14 @@ test("21. valor total do contrato é identificado sem ser confundido com pagamen
   assert.deepEqual((result.relationshipMetrics as { activeContractValues: unknown }).activeContractValues,
     [{ name: "Pilates anual", contractTotal: 4320, recurring: false }]);
 });
+test("22. contexto usa inteligência resumida sem expor histórico bruto", () => {
+  const result = snapshot({ contracts: [{ id: 1, codigoCliente: 1, codigoContratoBase: 1, dataInicio: "2026-01-01",
+    dataValidade: "2026-08-30", status: "Ativo" }], contractBases: [{ id: 1, descricao: "Pilates 2x" }],
+    receivables: [{ id: 1, codigoCliente: 1, dataVencimento: "2026-08-01", status: "Aberto" }] });
+  const context: CustomerContext = { identity: { relationshipStatus: "customer", firstName: "Ana" },
+    conversation: { recentMessages: [{ id: "m", conversationId: "v", direction: "inbound", role: "user",
+      content: "Quais são meus serviços?", createdAt: now }] }, customer: result };
+  const output = buildModelCustomerContext(context, now);
+  assert.match(output, /activeServices|renewal_due/);
+  assert.doesNotMatch(output, /dateOfBirth|lastPayment|overdueDays|human_followup|attendanceMetrics|consumedServicesSummary/);
+});

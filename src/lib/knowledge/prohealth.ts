@@ -9,7 +9,8 @@ export const proHealthKnowledge = {
     cnpj: "65.219.427/0001-20",
   },
   schedule: {
-    hours: "segunda a sexta, das 08h às 21h, com agendamento",
+    hours: "segunda a sexta; primeiro horário às 08h; último cliente entra às 20h; encerramento às 21h",
+    weekend: "sábado e domingo somente com agendamento prévio para clientes de planos; sem aula experimental e sem serviços avulsos",
     agendas: {
       pilates: "até 3 pessoas",
       atendimentoMassagem: "individual",
@@ -17,6 +18,7 @@ export const proHealthKnowledge = {
     },
   },
   pilates: {
+    experimentalClass: "A aula experimental de Pilates é oferecida gratuitamente.",
     single: "R$ 100",
     monthly: {
       oncePerWeek: "R$ 330",
@@ -34,6 +36,7 @@ export const proHealthKnowledge = {
       threeTimesPerWeek: "12x R$ 380 = R$ 4.560",
     },
     recurrenceNote: "Planos semestrais e anuais aparecem como recorrentes.",
+    freezing: { annual: "até 1 mês", semiannual: "até 15 dias" },
   },
   massages: {
     single: {
@@ -79,8 +82,7 @@ export const proHealthKnowledge = {
     appointment: "R$ 270",
   },
   duration: {
-    general:
-      "Os principais atendimentos são reservados em blocos de aproximadamente 60 minutos; isso não garante que todo procedimento dure exatamente 60 minutos.",
+    general: "Os atendimentos ocupam 1 hora completa, incluindo todo o atendimento e processo.",
     massageExpress: "Massagem Express: 30 minutos.",
   },
   positioning: {
@@ -99,17 +101,12 @@ export const proHealthKnowledge = {
     ],
     philosophy: "Integra corpo, movimento, recuperação e performance.",
   },
-  pendingInformation: [
-    "aula experimental e seu valor",
-    "antecedência de cancelamento",
-    "remarcação",
-    "faltas",
-    "reembolso",
-    "congelamento",
-    "classificação das massagens tradicionais e especiais",
-    "atendimento aos finais de semana",
-    "duração exata de cada procedimento",
-  ],
+  policies: {
+    cancellation: "Cancelamento ou remarcação exige aviso com 24 horas de antecedência.",
+    unannouncedAbsence: "Em caso de falta sem aviso, a sessão pode ser remarcada em até 30 dias.",
+    refund: "Reembolso é possível mediante atestado ou situação de força maior. Não interpretar automaticamente força maior; em caso de dúvida, encaminhar para a equipe.",
+  },
+  pendingInformation: ["classificação das massagens tradicionais e especiais"],
   clinicalSafety: {
     guidance:
       "Não diagnosticar, prescrever ou afirmar aptidão clínica. Em caso de condição médica, gestação, cirurgia recente, lesão relevante, problema cardiovascular, trombose, alteração importante de pressão ou dúvida sobre crioterapia, massagem ou exercício, orientar confirmação prévia com a equipe ou profissional responsável.",

@@ -1,5 +1,7 @@
 import { normalizeBrazilianPhone } from "./phone.ts";
 import { brazilianPhoneCandidates } from "../conversations/phone.ts";
+import { buildCustomerIntelligence } from "../customer-intelligence/engine.ts";
+import type { CustomerTimelineEvent } from "../customer-intelligence/types.ts";
 import type { NextfitAgenda, NextfitContract, NextfitContractBase, NextfitLookup, NextfitPerson, NextfitReceivable, NextfitSale, NextfitSnapshot } from "./types.ts";
 
 const ACTIVE_CONTRACT_STATUSES = new Set(["Ativo", "Suspenso", "Bloqueado", "Agendado"]);
@@ -71,7 +73,7 @@ export function buildSnapshot(input: {
   const customerSince = input.person.dataCadastro;
   const contractExpirations = activeContracts.map((contract) => new Date(contract.expiresAt)).sort((a, b) => a.getTime() - b.getTime());
   const relationshipMetrics = {
-    snapshotVersion: 3,
+    snapshotVersion: 4,
     daysAsCustomer: Math.max(0, dayDifference(now, new Date(customerSince))),
     relationshipAnniversaryDate: customerSince.slice(5, 10),
     ...(attended[0] ? { daysSinceLastVisit: dayDifference(now, attended[0].date) } : {}),
@@ -79,6 +81,29 @@ export function buildSnapshot(input: {
     ...(nextBirthday ? { daysUntilBirthday: dayDifference(nextBirthday, now) } : {}),
     inactivityDays: attended[0] ? dayDifference(now, attended[0].date) : undefined,
   };
+  const timeline: CustomerTimelineEvent[] = [
+    { type: "registration", occurredAt: input.person.dataCadastro },
+    ...(input.person.dataNascimento ? [{ type: "birthday" as const, occurredAt: input.person.dataNascimento }] : []),
+    ...input.contracts.flatMap((contract) => [
+      { type: "contract_start" as const, occurredAt: contract.dataInicio, service: bases.get(contract.codigoContratoBase) ?? "Contrato", status: contract.status },
+      { type: "contract_expiration" as const, occurredAt: contract.dataValidade, service: bases.get(contract.codigoContratoBase) ?? "Contrato", status: contract.status },
+    ]),
+    ...input.sales.filter((sale) => sale.status === "Concluida").map((sale) => ({ type: "purchase" as const, occurredAt: sale.data, ...(sale.descricao ? { service: sale.descricao.trim() } : {}) })),
+    ...relevantAgenda.filter((event) => event.date <= now && event.status === "Presente").map((event) => ({ type: "attendance" as const, occurredAt: event.date.toISOString() })),
+    ...relevantAgenda.filter((event) => event.date <= now && ["Falta", "FaltaJustificada"].includes(event.status)).map((event) => ({ type: "absence" as const, occurredAt: event.date.toISOString(), status: event.status })),
+    ...input.receivables.flatMap((item): CustomerTimelineEvent[] => {
+      if (item.status === "Recebido" && item.receberRecebimento) return [{ type: "payment", occurredAt: item.receberRecebimento.dataRecebimento, status: "received" }];
+      if (item.status === "Aberto") return [{ type: "financial_due", occurredAt: item.dataVencimento, status: new Date(item.dataVencimento) < now ? "overdue" : "open" }];
+      return [];
+    }),
+  ];
+  const customerIntelligence = buildCustomerIntelligence({
+    sourceRelationship: relationshipStatus,
+    timeline,
+    activeServices: activeContracts.map((contract) => contract.name),
+    financialStatus: overdue.length ? "overdue" : openReceivables.length ? "open" : "current",
+    now,
+  });
   return {
     externalCustomerId: String(input.person.id), source: "nextfit", relationshipStatus,
     ...(firstName(input.person.nome) ? { firstName: firstName(input.person.nome) } : {}),
@@ -91,7 +116,7 @@ export function buildSnapshot(input: {
     attendanceMetrics: { visitsLast30Days: last30.filter((event) => event.status === "Presente").length,
       visitsLast90Days: attended.filter((event) => dayDifference(now, event.date) <= 90).length, noShowsLast90Days: noShows,
       ...(attendanceDenominator ? { attendanceRatio: last90.filter((event) => event.status === "Presente").length / attendanceDenominator } : {}) },
-    relationshipMetrics: { ...relationshipMetrics, overdueCount: overdue.length,
+    relationshipMetrics: { ...relationshipMetrics, customerIntelligence, overdueCount: overdue.length,
       ...(openReceivables.length ? { nextDueAt: openReceivables.map((item) => item.dataVencimento).sort()[0] } : {}),
       ...(lastPayment ? { lastPayment: { amount: lastPayment.receberRecebimento!.valorRecebido,
         paidAt: lastPayment.receberRecebimento!.dataRecebimento,

@@ -34,11 +34,11 @@ const scenarios = [
   },
   {
     question: "Vocês abrem sábado?",
-    expected: ["segunda a sexta, das 08h às 21h", "Não afirmar funcionamento aos sábados"],
+    expected: ["primeiro horário às 08h", "sábado e domingo somente com agendamento prévio", "sem aula experimental"],
   },
   {
     question: "Tem aula experimental?",
-    expected: ["aula experimental e seu valor", "precisa confirmar com a equipe"],
+    expected: ["aula experimental de Pilates é oferecida gratuitamente"],
   },
   {
     question: "Onde vocês ficam?",
@@ -56,6 +56,20 @@ const scenarios = [
     ],
   },
 ] as const;
+
+const policyScenarios = [
+  ["Posso remarcar?", "24 horas de antecedência"],
+  ["Faltei sem avisar", "remarcada em até 30 dias"],
+  ["Posso pedir reembolso?", "mediante atestado ou situação de força maior"],
+  ["Posso congelar o Pilates anual?", "Congelamento anual: até 1 mês"],
+  ["Quanto tempo dura o atendimento?", "1 hora completa"],
+] as const;
+
+for (const [question, expected] of policyScenarios) {
+  test(`includes updated owner rule for: ${question}`, () => {
+    assert.ok(buildProHealthInstructions(question).includes(expected));
+  });
+}
 
 for (const scenario of scenarios) {
   test(`includes confirmed guidance for: ${scenario.question}`, () => {
