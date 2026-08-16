@@ -1,3 +1,6 @@
+import { after } from "next/server";
+
+import { generateWhatsAppReply } from "@/lib/ai/generate-whatsapp-reply";
 import { ZernioWhatsAppProvider } from "@/lib/whatsapp/zernio-provider";
 import {
   parseZernioWebhook,
@@ -5,13 +8,15 @@ import {
 } from "@/lib/whatsapp/zernio-webhook";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 export async function POST(request: Request) {
+  const aiGatewayApiKey = process.env.AI_GATEWAY_API_KEY;
   const apiKey = process.env.ZERNIO_API_KEY;
   const webhookSecret = process.env.ZERNIO_WEBHOOK_SECRET;
 
-  if (!apiKey || !webhookSecret) {
-    console.error("Zernio webhook configuration is incomplete");
+  if (!aiGatewayApiKey || !apiKey || !webhookSecret) {
+    console.error("Webhook configuration is incomplete");
     return Response.json({ error: "Webhook unavailable" }, { status: 503 });
   }
 
@@ -48,26 +53,29 @@ export async function POST(request: Request) {
     messageId: message.messageId,
   });
 
-  try {
-    const provider = new ZernioWhatsAppProvider(apiKey);
-    await provider.sendText({
-      accountId: message.accountId,
-      conversationId: message.conversationId,
-      idempotencyKey: `zernio-webhook-${message.eventId}`,
-      text: `ProHealth teste recebido: ${message.text}`,
-    });
-  } catch (error) {
-    console.error("Zernio reply failed", {
-      eventId: message.eventId,
-      messageId: message.messageId,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-    return Response.json({ error: "Reply failed" }, { status: 502 });
-  }
+  after(async () => {
+    try {
+      const reply = await generateWhatsAppReply(message.text);
+      const provider = new ZernioWhatsAppProvider(apiKey);
+      await provider.sendText({
+        accountId: message.accountId,
+        conversationId: message.conversationId,
+        idempotencyKey: `zernio-webhook-${message.eventId}`,
+        text: reply,
+      });
 
-  console.info("Zernio reply sent", {
-    eventId: message.eventId,
-    messageId: message.messageId,
+      console.info("AI WhatsApp reply sent", {
+        eventId: message.eventId,
+        messageId: message.messageId,
+      });
+    } catch (error) {
+      console.error("AI WhatsApp reply failed", {
+        eventId: message.eventId,
+        messageId: message.messageId,
+        error: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
   });
+
   return Response.json({ received: true });
 }
