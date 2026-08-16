@@ -4,7 +4,7 @@ import type {
 } from "./types.ts";
 
 const NEXTFIT_API_BASE_URL = "https://integracao.nextfit.com.br/api/v1";
-const PAGE_SIZE = 200;
+const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
 
 type Paged<T> = { items?: T[] | null; temProximaPagina: boolean };
@@ -20,7 +20,12 @@ export class NextfitClient implements NextfitApi {
         cache: "no-store",
       });
       if (!response.ok) {
-        console.warn("Nextfit API request rejected", { endpoint: path, status: response.status });
+        const responseText = await response.text();
+        const validation = responseText.slice(0, 400)
+          .replace(/(api[-_ ]?key|authorization|token)[^,}\]]*/gi, "$1:[redacted]")
+          .replace(/[\r\n]+/g, " ");
+        console.warn("Nextfit API request rejected", { endpoint: path, status: response.status,
+          ...(validation ? { validation } : {}) });
         throw new Error(`Nextfit HTTP ${response.status}`);
       }
       return response.json() as Promise<Paged<T>>;
