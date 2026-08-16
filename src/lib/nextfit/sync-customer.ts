@@ -14,7 +14,7 @@ export function createNextfitEnricher(input: { api: NextfitApi; store: CustomerP
   return async ({ identity, phoneNumber, message }: { identity: ConversationIdentity; phoneNumber: string; message: string }): Promise<ConversationIdentity> => {
     const now = input.now?.() ?? new Date();
     const state = await input.store.getProfileSyncState(identity.contactId);
-    if (!shouldRefresh(state.syncedAt, message, now)) return identity;
+    if (state.externalCustomerId && !shouldRefresh(state.syncedAt, message, now)) return identity;
     const [customers, leads] = await Promise.all([input.api.listCustomers(), input.api.listLeads()]);
     const match = lookupPersonByPhone(phoneNumber, customers, leads);
     if (match.kind !== "match") {

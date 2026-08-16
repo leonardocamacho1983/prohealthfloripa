@@ -5,7 +5,7 @@ import { handleIncomingMessage } from "../conversations/handle-incoming-message.
 import type { ConversationIdentity, ConversationRepository } from "../conversations/types.ts";
 import { buildModelCustomerContext, type CustomerContext } from "../customer-context/index.ts";
 import { buildSnapshot, classifyRelationship, lookupPersonByPhone } from "./normalization.ts";
-import { shouldRefresh } from "./sync-customer.ts";
+import { createNextfitEnricher, shouldRefresh } from "./sync-customer.ts";
 import type { NextfitPerson } from "./types.ts";
 
 const now = new Date("2026-08-16T12:00:00.000Z");
@@ -63,4 +63,22 @@ test("16. contexto do modelo minimiza dados sensíveis e descarta dados volátei
   const output = buildModelCustomerContext(context, now);
   assert.equal(output.includes("dateOfBirth"), false); assert.equal(output.includes("overdue"), false);
   assert.equal(shouldRefresh("2026-08-16T11:50:00Z", "meu pagamento", now), false);
+});
+test("17. snapshot sem vínculo não impede nova consulta de identidade", async () => {
+  let customerQueries = 0;
+  const identity: ConversationIdentity = { contactId: "c", conversationId: "v", relationshipStatus: "unknown" };
+  const enrich = createNextfitEnricher({
+    api: {
+      async listCustomers() { customerQueries += 1; return []; }, async listLeads() { return []; },
+      async listContracts() { return []; }, async listContractBases() { return []; }, async listReceivables() { return []; },
+      async listSales() { return []; }, async listAgenda() { return []; }, async listOpportunities() { return []; },
+    },
+    store: {
+      async getProfileSyncState() { return { syncedAt: now.toISOString() }; },
+      async saveCustomerSnapshot() { return identity; },
+    },
+    now: () => now,
+  });
+  await enrich({ identity, phoneNumber: "+5548999991234", message: "Quando vence meu plano?" });
+  assert.equal(customerQueries, 1);
 });
