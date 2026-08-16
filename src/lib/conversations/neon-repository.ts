@@ -1,35 +1,64 @@
 import { getDatabase } from "@/lib/db/neon";
-import type { ConversationIdentity, ConversationMessage, ConversationRepository, CustomerProfile, CustomerProfileStore, RelationshipStatus } from "./types";
+import type { ConversationIdentity, ConversationMessage, ConversationRepository, ConversationTurnRepository, CustomerProfile, CustomerProfileStore, OutboundReservation, RelationshipStatus, TurnAcquisition, TurnCompletionState } from "./types";
 import type { ConversationStatus } from "./types";
 import type { HandoffConversation, HandoffSource, HandoffStore, InboxConversation } from "../handoff/types";
 
-type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; conversation_status: ConversationStatus; human_expires_at: Date | null; inserted: boolean };
+type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; conversation_status: ConversationStatus; human_expires_at: Date | null; inserted: boolean; revision: string | number };
 type ProfileRow = { customer_since: string | null; date_of_birth: string | null; financial_status: string | null; last_visit_at: Date | null; next_visit_at: Date | null; active_contracts: unknown | null; consumed_services_summary: unknown | null; attendance_metrics: unknown | null; relationship_metrics: unknown | null; synced_at: Date | null };
 
-let handoffSchemaPromise: Promise<void> | undefined;
-function ensureHandoffSchema(): Promise<void> {
-  if (!handoffSchemaPromise) {
+let runtimeSchemaPromise: Promise<void> | undefined;
+function ensureRuntimeSchema(): Promise<void> {
+  if (!runtimeSchemaPromise) {
     const sql = getDatabase();
-    handoffSchemaPromise = sql.transaction((tx) => [
+    runtimeSchemaPromise = sql.transaction((tx) => [
       tx`ALTER TABLE conversations ADD COLUMN IF NOT EXISTS provider_account_id text,
         ADD COLUMN IF NOT EXISTS provider_conversation_id text, ADD COLUMN IF NOT EXISTS handoff_reason text,
         ADD COLUMN IF NOT EXISTS handoff_source text, ADD COLUMN IF NOT EXISTS handoff_requested_at timestamptz,
         ADD COLUMN IF NOT EXISTS human_started_at timestamptz, ADD COLUMN IF NOT EXISTS human_expires_at timestamptz,
-        ADD COLUMN IF NOT EXISTS human_last_viewed_at timestamptz, ADD COLUMN IF NOT EXISTS closed_at timestamptz`,
+        ADD COLUMN IF NOT EXISTS human_last_viewed_at timestamptz, ADD COLUMN IF NOT EXISTS closed_at timestamptz,
+        ADD COLUMN IF NOT EXISTS inbound_revision bigint NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS processed_revision bigint NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS next_process_at timestamptz,
+        ADD COLUMN IF NOT EXISTS processing_token text,
+        ADD COLUMN IF NOT EXISTS processing_revision bigint,
+        ADD COLUMN IF NOT EXISTS processing_lease_until timestamptz`,
+      tx`ALTER TABLE messages ADD COLUMN IF NOT EXISTS input_revision bigint,
+        ADD COLUMN IF NOT EXISTS response_revision bigint,
+        ADD COLUMN IF NOT EXISTS bubble_index integer,
+        ADD COLUMN IF NOT EXISTS idempotency_key text,
+        ADD COLUMN IF NOT EXISTS delivery_status text NOT NULL DEFAULT 'sent',
+        ADD COLUMN IF NOT EXISTS sent_at timestamptz,
+        ADD COLUMN IF NOT EXISTS delivery_attempts integer NOT NULL DEFAULT 0`,
       tx`DROP INDEX IF EXISTS conversations_one_active_per_contact`,
       tx`CREATE UNIQUE INDEX IF NOT EXISTS conversations_one_open_per_contact ON conversations(contact_id)
         WHERE status IN ('active','human_requested','human_active')`,
       tx`CREATE INDEX IF NOT EXISTS conversations_handoff_queue_idx ON conversations(status, handoff_requested_at DESC)
         WHERE status IN ('human_requested','human_active')`,
-    ]).then(() => undefined).catch((error) => { handoffSchemaPromise = undefined; throw error; });
+      tx`CREATE UNIQUE INDEX IF NOT EXISTS messages_idempotency_key_unique ON messages(idempotency_key)
+        WHERE idempotency_key IS NOT NULL`,
+      tx`CREATE INDEX IF NOT EXISTS messages_conversation_input_revision_idx ON messages(conversation_id, input_revision)
+        WHERE direction='inbound'`,
+      tx`CREATE TABLE IF NOT EXISTS conversation_turns (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        conversation_id uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        revision bigint NOT NULL,
+        state text NOT NULL DEFAULT 'processing',
+        inbound_count integer NOT NULL DEFAULT 0,
+        analysis jsonb, response_plan jsonb,
+        started_at timestamptz NOT NULL DEFAULT now(), completed_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (conversation_id, revision))`,
+      tx`CREATE INDEX IF NOT EXISTS conversation_turns_state_idx ON conversation_turns(state, updated_at DESC)`,
+    ]).then(() => undefined).catch((error) => { runtimeSchemaPromise = undefined; throw error; });
   }
-  return handoffSchemaPromise;
+  return runtimeSchemaPromise;
 }
 
-export class NeonConversationRepository implements ConversationRepository, CustomerProfileStore, HandoffStore {
-  async recordInbound(input: { phoneNumber: string; providerMessageId: string; content: string; providerAccountId?: string; providerConversationId?: string }) {
-    await ensureHandoffSchema();
+export class NeonConversationRepository implements ConversationRepository, ConversationTurnRepository, CustomerProfileStore, HandoffStore {
+  async recordInbound(input: { phoneNumber: string; providerMessageId: string; content: string; providerAccountId?: string; providerConversationId?: string; settleAt?: Date }) {
+    await ensureRuntimeSchema();
     const sql = getDatabase();
+    const settleAt = input.settleAt ?? new Date();
     await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
       WHERE contact_id IN (SELECT id FROM contacts WHERE phone_number=${input.phoneNumber})
         AND status='human_active' AND human_expires_at <= now()`;
@@ -39,34 +68,41 @@ export class NeonConversationRepository implements ConversationRepository, Custo
         ON CONFLICT (phone_number) DO UPDATE SET updated_at=now()
         RETURNING id, first_name, relationship_status
       ), existing_conversation AS (
-        SELECT id, contact_id, status, human_expires_at FROM conversations
+        SELECT id, contact_id, status, human_expires_at, inbound_revision FROM conversations
         WHERE contact_id=(SELECT id FROM contact) AND status IN ('active','human_requested','human_active') LIMIT 1
       ), inserted_conversation AS (
         INSERT INTO conversations (contact_id)
         SELECT id FROM contact WHERE NOT EXISTS (SELECT 1 FROM existing_conversation)
-        RETURNING id, contact_id, status, human_expires_at
+        RETURNING id, contact_id, status, human_expires_at, inbound_revision
       ), conversation AS (
         SELECT * FROM existing_conversation UNION ALL SELECT * FROM inserted_conversation
       ), inbound AS (
         INSERT INTO messages (conversation_id, provider_message_id, direction, role, content)
         SELECT id, ${input.providerMessageId}, 'inbound', 'user', ${input.content} FROM conversation
         ON CONFLICT (provider_message_id) WHERE provider_message_id IS NOT NULL DO NOTHING
-        RETURNING conversation_id
-      ), touched AS (
-        UPDATE conversations SET last_message_at=now(), updated_at=now(),
+        RETURNING id, conversation_id
+      ), revisioned AS (
+        UPDATE conversations SET inbound_revision=inbound_revision + 1,
+          next_process_at=${settleAt}, processing_token=NULL, processing_revision=NULL,
+          processing_lease_until=NULL, last_message_at=now(), updated_at=now(),
           provider_account_id=COALESCE(${input.providerAccountId ?? null}, provider_account_id),
           provider_conversation_id=COALESCE(${input.providerConversationId ?? null}, provider_conversation_id),
           human_expires_at=CASE WHEN status='human_active' THEN now() + interval '12 hours' ELSE human_expires_at END
         WHERE id IN (SELECT conversation_id FROM inbound)
+        RETURNING id, inbound_revision
+      ), tagged AS (
+        UPDATE messages SET input_revision=revisioned.inbound_revision
+        FROM inbound, revisioned WHERE messages.id=inbound.id AND revisioned.id=inbound.conversation_id
       )
       SELECT contact.id contact_id, conversation.id conversation_id, contact.first_name,
              contact.relationship_status, conversation.status conversation_status,
-             conversation.human_expires_at, EXISTS(SELECT 1 FROM inbound) inserted
+             conversation.human_expires_at, EXISTS(SELECT 1 FROM inbound) inserted,
+             COALESCE((SELECT inbound_revision FROM revisioned), conversation.inbound_revision) revision
       FROM contact CROSS JOIN conversation
     ` as IdentityRow[];
     const row = rows[0];
     if (!row) throw new Error("Failed to establish conversation identity");
-    return { inserted: row.inserted, conversationStatus: row.conversation_status,
+    return { inserted: row.inserted, revision: Number(row.revision), conversationStatus: row.conversation_status,
       ...(row.human_expires_at ? { humanExpiresAt: new Date(row.human_expires_at) } : {}), identity: {
       contactId: row.contact_id, conversationId: row.conversation_id,
       relationshipStatus: row.relationship_status, ...(row.first_name ? { firstName: row.first_name } : {}),
@@ -74,7 +110,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
   }
 
   async getConversationState(conversationId: string) {
-    await ensureHandoffSchema();
+    await ensureRuntimeSchema();
     const sql = getDatabase();
     const rows = await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
       WHERE id=${conversationId} AND status='human_active' AND human_expires_at <= now()
@@ -86,16 +122,17 @@ export class NeonConversationRepository implements ConversationRepository, Custo
 
   async requestHandoff(input: { conversationId: string; providerAccountId: string; providerConversationId: string;
     reason: string; source: HandoffSource; summary: string; now?: Date }) {
-    await ensureHandoffSchema(); const sql = getDatabase(); const now = input.now ?? new Date();
+    await ensureRuntimeSchema(); const sql = getDatabase(); const now = input.now ?? new Date();
     await sql`UPDATE conversations SET status='human_requested', provider_account_id=${input.providerAccountId},
       provider_conversation_id=${input.providerConversationId}, handoff_reason=${input.reason}, handoff_source=${input.source},
       handoff_requested_at=COALESCE(handoff_requested_at, ${now}), human_expires_at=NULL,
-      summary=${input.summary}, updated_at=now() WHERE id=${input.conversationId}`;
+      summary=${input.summary}, processed_revision=inbound_revision, processing_token=NULL,
+      processing_revision=NULL, processing_lease_until=NULL, updated_at=now() WHERE id=${input.conversationId}`;
     await this.recordHandoffEvent(input.conversationId, `handoff_requested:${input.source}`);
   }
 
   async listHandoffs(): Promise<HandoffConversation[]> {
-    await ensureHandoffSchema(); const sql = getDatabase();
+    await ensureRuntimeSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
       WHERE status='human_active' AND human_expires_at <= now()`;
     const rows = await sql`SELECT c.id, c.contact_id, ct.first_name, ct.phone_number, c.status, c.handoff_reason,
@@ -121,7 +158,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
   }
 
   async listInboxConversations(limit = 100): Promise<InboxConversation[]> {
-    await ensureHandoffSchema(); const sql = getDatabase();
+    await ensureRuntimeSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
       WHERE status='human_active' AND human_expires_at <= now()`;
     const rows = await sql`SELECT c.id, c.contact_id, ct.first_name, ct.phone_number, c.status, c.handoff_reason,
@@ -149,11 +186,13 @@ export class NeonConversationRepository implements ConversationRepository, Custo
   }
 
   async assumeAgentConversation(conversationId: string) {
-    await ensureHandoffSchema(); const sql = getDatabase();
+    await ensureRuntimeSchema(); const sql = getDatabase();
     const rows = await sql`UPDATE conversations SET status='human_active', handoff_reason='Conversa assumida pela equipe.',
       handoff_source='customer', handoff_requested_at=COALESCE(handoff_requested_at, now()),
       human_started_at=now(), human_expires_at=now() + interval '12 hours',
-      summary=COALESCE(summary, 'Conversa assumida diretamente pelo painel.'), updated_at=now()
+      summary=COALESCE(summary, 'Conversa assumida diretamente pelo painel.'),
+      processed_revision=inbound_revision, processing_token=NULL, processing_revision=NULL,
+      processing_lease_until=NULL, updated_at=now()
       WHERE id=${conversationId} AND status='active'
         AND provider_account_id IS NOT NULL AND provider_conversation_id IS NOT NULL
       RETURNING id` as Array<{ id: string }>;
@@ -162,27 +201,30 @@ export class NeonConversationRepository implements ConversationRepository, Custo
   }
 
   async takeHandoff(conversationId: string) {
-    await ensureHandoffSchema(); const sql = getDatabase();
+    await ensureRuntimeSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='human_active', human_started_at=COALESCE(human_started_at, now()),
-      human_expires_at=now() + interval '12 hours', updated_at=now() WHERE id=${conversationId} AND status='human_requested'`;
+      human_expires_at=now() + interval '12 hours', processed_revision=inbound_revision,
+      processing_token=NULL, processing_revision=NULL, processing_lease_until=NULL,
+      updated_at=now() WHERE id=${conversationId} AND status='human_requested'`;
     await this.recordHandoffEvent(conversationId, "handoff_taken");
   }
 
   async touchHandoff(conversationId: string) {
-    await ensureHandoffSchema(); const sql = getDatabase();
+    await ensureRuntimeSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET human_expires_at=now() + interval '12 hours', last_message_at=now(), updated_at=now()
       WHERE id=${conversationId} AND status='human_active'`;
   }
 
   async closeHandoff(conversationId: string) {
-    await ensureHandoffSchema(); const sql = getDatabase();
-    await sql`UPDATE conversations SET status='closed', closed_at=now(), human_expires_at=NULL, updated_at=now()
-      WHERE id=${conversationId} AND status IN ('human_requested','human_active')`;
+    await ensureRuntimeSchema(); const sql = getDatabase();
+    await sql`UPDATE conversations SET status='closed', closed_at=now(), human_expires_at=NULL, updated_at=now(),
+      processed_revision=inbound_revision, processing_token=NULL, processing_revision=NULL,
+      processing_lease_until=NULL WHERE id=${conversationId} AND status IN ('human_requested','human_active')`;
     await this.recordHandoffEvent(conversationId, "handoff_closed");
   }
 
   async markHandoffViewed(conversationId: string) {
-    await ensureHandoffSchema(); const sql = getDatabase();
+    await ensureRuntimeSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET human_last_viewed_at=now(), updated_at=now()
       WHERE id=${conversationId}`;
   }
@@ -197,24 +239,165 @@ export class NeonConversationRepository implements ConversationRepository, Custo
   async recordOutbound(input: { conversationId: string; content: string }) {
     const sql = getDatabase();
     await sql`WITH outbound AS (
-      INSERT INTO messages (conversation_id, direction, role, content)
-      VALUES (${input.conversationId}, 'outbound', 'assistant', ${input.content})
+      INSERT INTO messages (conversation_id, direction, role, content, delivery_status, sent_at)
+      VALUES (${input.conversationId}, 'outbound', 'assistant', ${input.content}, 'sent', now())
     ) UPDATE conversations SET last_message_at=now(), updated_at=now() WHERE id=${input.conversationId}`;
+  }
+
+  async acquireTurn(input: { conversationId: string; observedRevision: number; token: string; leaseSeconds: number }): Promise<TurnAcquisition> {
+    await ensureRuntimeSchema();
+    const sql = getDatabase();
+    const rows = await sql`UPDATE conversations SET processing_token=${input.token},
+      processing_revision=inbound_revision,
+      processing_lease_until=now() + make_interval(secs => ${input.leaseSeconds}), updated_at=now()
+      WHERE id=${input.conversationId} AND status='active'
+        AND inbound_revision=${input.observedRevision} AND processed_revision < inbound_revision
+        AND COALESCE(next_process_at, now()) <= now()
+        AND (processing_token IS NULL OR processing_lease_until IS NULL OR processing_lease_until <= now())
+      RETURNING id, contact_id, inbound_revision, processed_revision, provider_account_id,
+        provider_conversation_id` as Array<{ id: string; contact_id: string; inbound_revision: string | number;
+        processed_revision: string | number; provider_account_id: string | null; provider_conversation_id: string | null }>;
+    const acquired = rows[0];
+    if (!acquired) {
+      const states = await sql`SELECT status, inbound_revision, processed_revision, next_process_at,
+        processing_token, processing_lease_until FROM conversations WHERE id=${input.conversationId} LIMIT 1` as Array<{
+          status: ConversationStatus; inbound_revision: string | number; processed_revision: string | number;
+          next_process_at: Date | null; processing_token: string | null; processing_lease_until: Date | null }>;
+      const state = states[0];
+      if (!state) return { kind: "missing" };
+      if (state.status !== "active") return { kind: "human" };
+      if (Number(state.processed_revision) >= input.observedRevision) return { kind: "complete" };
+      if (Number(state.inbound_revision) !== input.observedRevision) return { kind: "stale" };
+      if (state.next_process_at && new Date(state.next_process_at).getTime() > Date.now()) return { kind: "not_due" };
+      return { kind: "busy" };
+    }
+
+    const revision = Number(acquired.inbound_revision);
+    const processedRevision = Number(acquired.processed_revision);
+    const identityRows = await sql`SELECT ct.phone_number, ct.first_name, ct.relationship_status
+      FROM contacts ct WHERE ct.id=${acquired.contact_id} LIMIT 1` as Array<{
+        phone_number: string; first_name: string | null; relationship_status: RelationshipStatus }>;
+    const identityRow = identityRows[0];
+    if (!identityRow || !acquired.provider_account_id || !acquired.provider_conversation_id) {
+      await this.releaseTurn({ conversationId: input.conversationId, token: input.token, state: "failed" });
+      throw new Error("Conversation provider identity is incomplete");
+    }
+    const messageRows = await sql`SELECT id, conversation_id, provider_message_id, direction, role, content,
+      created_at, input_revision, response_revision FROM messages
+      WHERE conversation_id=${input.conversationId} AND direction='inbound'
+        AND input_revision > ${processedRevision} AND input_revision <= ${revision}
+      ORDER BY input_revision ASC, created_at ASC, id ASC` as Array<{
+        id: string; conversation_id: string; provider_message_id: string | null;
+        direction: "inbound" | "outbound"; role: "user" | "assistant" | "system"; content: string;
+        created_at: Date; input_revision: string | number | null; response_revision: string | number | null }>;
+    await sql`INSERT INTO conversation_turns (conversation_id, revision, state, inbound_count)
+      VALUES (${input.conversationId}, ${revision}, 'processing', ${messageRows.length})
+      ON CONFLICT (conversation_id, revision) DO UPDATE SET state='processing', inbound_count=EXCLUDED.inbound_count,
+        started_at=now(), completed_at=NULL, updated_at=now()`;
+    const identity: ConversationIdentity = { contactId: acquired.contact_id, conversationId: acquired.id,
+      relationshipStatus: identityRow.relationship_status,
+      ...(identityRow.first_name ? { firstName: identityRow.first_name } : {}) };
+    return { kind: "acquired", turn: { conversationId: acquired.id, revision, processedRevision,
+      phoneNumber: identityRow.phone_number, accountId: acquired.provider_account_id,
+      providerConversationId: acquired.provider_conversation_id, identity,
+      messages: messageRows.map((row) => ({ id: row.id, conversationId: row.conversation_id,
+        ...(row.provider_message_id ? { providerMessageId: row.provider_message_id } : {}),
+        direction: row.direction, role: row.role, content: row.content, createdAt: new Date(row.created_at),
+        ...(row.input_revision !== null ? { inputRevision: Number(row.input_revision) } : {}),
+        ...(row.response_revision !== null ? { responseRevision: Number(row.response_revision) } : {}) })) } };
+  }
+
+  async reserveOutbound(input: { conversationId: string; revision: number; token: string; bubbleIndex: number;
+    content: string; idempotencyKey: string }): Promise<OutboundReservation> {
+    const sql = getDatabase();
+    const rows = await sql`WITH current AS (
+      SELECT id FROM conversations WHERE id=${input.conversationId} AND status='active'
+        AND inbound_revision=${input.revision} AND processing_revision=${input.revision}
+        AND processing_token=${input.token} AND processing_lease_until > now()
+    ), attempted AS (
+      INSERT INTO messages (conversation_id, direction, role, content, response_revision, bubble_index,
+        idempotency_key, delivery_status, delivery_attempts)
+      SELECT id, 'outbound', 'assistant', ${input.content}, ${input.revision}, ${input.bubbleIndex},
+        ${input.idempotencyKey}, 'pending', 1 FROM current
+      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE SET
+        content=EXCLUDED.content,
+        delivery_status=CASE WHEN messages.delivery_status='sent' THEN 'sent' ELSE 'pending' END,
+        delivery_attempts=messages.delivery_attempts + 1
+      RETURNING delivery_status
+    ) SELECT EXISTS(SELECT 1 FROM current) valid,
+      (SELECT delivery_status FROM attempted LIMIT 1) delivery_status` as Array<{
+        valid: boolean; delivery_status: "pending" | "sent" | null }>;
+    const row = rows[0];
+    if (!row?.valid || !row.delivery_status) return "stale";
+    return row.delivery_status === "sent" ? "already_sent" : "reserved";
+  }
+
+  async markOutboundSent(input: { idempotencyKey: string }) {
+    const sql = getDatabase();
+    await sql`WITH sent AS (UPDATE messages SET delivery_status='sent', sent_at=now()
+      WHERE idempotency_key=${input.idempotencyKey} RETURNING conversation_id)
+      UPDATE conversations SET last_message_at=now(), updated_at=now()
+      WHERE id IN (SELECT conversation_id FROM sent)`;
+  }
+
+  async markOutboundFailed(input: { idempotencyKey: string }) {
+    const sql = getDatabase();
+    await sql`UPDATE messages SET delivery_status='failed' WHERE idempotency_key=${input.idempotencyKey}`;
+  }
+
+  async completeTurn(input: { conversationId: string; revision: number; token: string; state: TurnCompletionState;
+    analysis?: unknown; responsePlan?: unknown }): Promise<boolean> {
+    const sql = getDatabase();
+    const rows = await sql`UPDATE conversations SET processed_revision=${input.revision},
+      processing_token=NULL, processing_revision=NULL, processing_lease_until=NULL,
+      next_process_at=NULL, updated_at=now()
+      WHERE id=${input.conversationId} AND status='active' AND inbound_revision=${input.revision}
+        AND processing_revision=${input.revision} AND processing_token=${input.token}
+      RETURNING id` as Array<{ id: string }>;
+    if (!rows[0]) return false;
+    await sql`UPDATE conversation_turns SET state=${input.state},
+      analysis=${input.analysis === undefined ? null : JSON.stringify(input.analysis)}::jsonb,
+      response_plan=${input.responsePlan === undefined ? null : JSON.stringify(input.responsePlan)}::jsonb,
+      completed_at=now(), updated_at=now()
+      WHERE conversation_id=${input.conversationId} AND revision=${input.revision}`;
+    return true;
+  }
+
+  async releaseTurn(input: { conversationId: string; token: string; state?: Extract<TurnCompletionState, "failed" | "stale"> }) {
+    const sql = getDatabase();
+    const rows = await sql`WITH current AS (
+      SELECT processing_revision FROM conversations WHERE id=${input.conversationId}
+        AND processing_token=${input.token} FOR UPDATE
+    ), released AS (
+      UPDATE conversations SET processing_token=NULL, processing_revision=NULL,
+        processing_lease_until=NULL, updated_at=now() WHERE id=${input.conversationId}
+          AND processing_token=${input.token} RETURNING id
+    ) SELECT processing_revision FROM current WHERE EXISTS(SELECT 1 FROM released)` as Array<{
+      processing_revision: string | number | null }>;
+    const revision = rows[0]?.processing_revision;
+    if (revision !== null && revision !== undefined && input.state) {
+      await sql`UPDATE conversation_turns SET state=${input.state}, completed_at=now(), updated_at=now()
+        WHERE conversation_id=${input.conversationId} AND revision=${Number(revision)}`;
+    }
   }
 
   async getRecentMessages(conversationId: string, limit: number) {
     const sql = getDatabase();
     const rows = await sql`
       SELECT * FROM (
-        SELECT id, conversation_id, provider_message_id, direction, role, content, created_at
+        SELECT id, conversation_id, provider_message_id, direction, role, content, created_at,
+          input_revision, response_revision
         FROM messages WHERE conversation_id=${conversationId}
+          AND (direction='inbound' OR delivery_status='sent')
         ORDER BY created_at DESC, id DESC LIMIT ${limit}
       ) recent ORDER BY created_at ASC, id ASC
-    ` as Array<{ id: string; conversation_id: string; provider_message_id: string | null; direction: "inbound" | "outbound"; role: "user" | "assistant" | "system"; content: string; created_at: Date }>;
+    ` as Array<{ id: string; conversation_id: string; provider_message_id: string | null; direction: "inbound" | "outbound"; role: "user" | "assistant" | "system"; content: string; created_at: Date; input_revision: string | number | null; response_revision: string | number | null }>;
     return rows.map((row): ConversationMessage => ({
       id: row.id, conversationId: row.conversation_id, direction: row.direction, role: row.role,
       content: row.content, createdAt: new Date(row.created_at),
       ...(row.provider_message_id ? { providerMessageId: row.provider_message_id } : {}),
+      ...(row.input_revision !== null ? { inputRevision: Number(row.input_revision) } : {}),
+      ...(row.response_revision !== null ? { responseRevision: Number(row.response_revision) } : {}),
     }));
   }
 

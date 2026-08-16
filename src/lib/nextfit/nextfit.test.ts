@@ -5,7 +5,7 @@ import { handleIncomingMessage } from "../conversations/handle-incoming-message.
 import type { ConversationIdentity, ConversationRepository } from "../conversations/types.ts";
 import { buildModelCustomerContext, type CustomerContext } from "../customer-context/index.ts";
 import { buildSnapshot, classifyRelationship, lookupPersonByPhone } from "./normalization.ts";
-import { createNextfitEnricher, shouldRefresh } from "./sync-customer.ts";
+import { createNextfitEnricher, needsNextfitEnrichment, shouldRefresh } from "./sync-customer.ts";
 import type { NextfitPerson } from "./types.ts";
 
 const now = new Date("2026-08-16T12:00:00.000Z");
@@ -49,7 +49,7 @@ test("15. falha no enriquecimento não interrompe resposta do WhatsApp", async (
   const identity: ConversationIdentity = { contactId: "c", conversationId: "v", relationshipStatus: "unknown" };
   let sent = false;
   const repository: ConversationRepository = {
-    async recordInbound() { return { inserted: true, identity }; }, async recordOutbound() {},
+    async recordInbound() { return { inserted: true, identity, revision: 1 }; }, async recordOutbound() {},
     async getRecentMessages() { return []; }, async getCustomerProfile() { return undefined; },
   };
   const result = await handleIncomingMessage({ accountId: "a", providerConversationId: "v", providerEventId: "e", providerMessageId: "m",
@@ -63,6 +63,11 @@ test("16. contexto do modelo minimiza dados sensíveis e descarta dados volátei
   const output = buildModelCustomerContext(context, now);
   assert.equal(output.includes("dateOfBirth"), false); assert.equal(output.includes("overdue"), false);
   assert.equal(shouldRefresh("2026-08-16T11:50:00Z", "meu pagamento", now), false);
+});
+test("16b. Nextfit só entra no caminho crítico quando a pergunta é pessoal", () => {
+  assert.equal(needsNextfitEnrichment("Quanto custa massagem Lomi-Lomi?"), false);
+  assert.equal(needsNextfitEnrichment("Quando vence meu plano?"), true);
+  assert.equal(needsNextfitEnrichment("Qual foi meu último pagamento?"), true);
 });
 test("17. snapshot sem vínculo não impede nova consulta de identidade", async () => {
   let customerQueries = 0;
@@ -81,6 +86,24 @@ test("17. snapshot sem vínculo não impede nova consulta de identidade", async 
   });
   await enrich({ identity, phoneNumber: "+5548999991234", message: "Quando vence meu plano?" });
   assert.equal(customerQueries, 1);
+});
+test("17b. resultado negativo recente evita varrer clientes novamente", async () => {
+  let customerQueries = 0;
+  const identity: ConversationIdentity = { contactId: "c", conversationId: "v", relationshipStatus: "unknown" };
+  const enrich = createNextfitEnricher({
+    api: {
+      async listCustomers() { customerQueries += 1; return []; }, async listLeads() { return []; },
+      async listContracts() { return []; }, async listContractBases() { return []; }, async listReceivables() { return []; },
+      async listSales() { return []; }, async listAgenda() { return []; }, async listOpportunities() { return []; },
+    },
+    store: {
+      async getProfileSyncState() { return { syncedAt: now.toISOString(), snapshotVersion: 4 }; },
+      async saveCustomerSnapshot() { return identity; },
+    },
+    now: () => now,
+  });
+  await enrich({ identity, phoneNumber: "+5548999991234", message: "Quando vence meu plano?" });
+  assert.equal(customerQueries, 0);
 });
 test("18. falha de fonte opcional não descarta contrato disponível", async () => {
   let savedContractCount = 0;

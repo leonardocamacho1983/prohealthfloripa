@@ -44,7 +44,7 @@ function flowFixture(status: ConversationStatus = "active") {
       messages.push({ id: input.providerMessageId, conversationId: "conversation", providerMessageId: input.providerMessageId,
         direction: "inbound" as const, role: "user" as const, content: input.content, createdAt: new Date() });
       return { identity: { contactId: "contact", conversationId: "conversation", relationshipStatus: "unknown" as const },
-        inserted: true, conversationStatus: status };
+        inserted: true, revision: 1, conversationStatus: status };
     },
     async recordOutbound(input: { conversationId: string; content: string }) { messages.push({ id: "out", conversationId: input.conversationId,
       direction: "outbound", role: "assistant", content: input.content, createdAt: new Date() }); },

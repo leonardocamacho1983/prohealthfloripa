@@ -3,6 +3,11 @@ import { buildSnapshot, lookupPersonByPhone } from "./normalization.ts";
 import type { NextfitApi } from "./types.ts";
 
 const VOLATILE_TERMS = /\b(venc|pag|finance|plano|contrato|agenda|visita|frequ[eê]ncia)\w*/i;
+const PERSONAL_CONTEXT_TERMS = /\b(?:meu|minha|meus|minhas|sou\s+cliente|cadastro|contrato|venc\w*|paguei|pagamento|cobran[cç]a|mensalidade|pr[oó]xima\s+(?:aula|visita|consulta)|[uú]ltim[oa]\s+(?:servi[cç]o|visita|pagamento)|frequ[eê]ncia|presen[cç]a)\b/i;
+
+export function needsNextfitEnrichment(message: string): boolean {
+  return PERSONAL_CONTEXT_TERMS.test(message);
+}
 
 export function shouldRefresh(syncedAt: string | undefined, message: string, now = new Date()): boolean {
   if (!syncedAt) return true;
@@ -14,7 +19,7 @@ export function createNextfitEnricher(input: { api: NextfitApi; store: CustomerP
   return async ({ identity, phoneNumber, message }: { identity: ConversationIdentity; phoneNumber: string; message: string }): Promise<ConversationIdentity> => {
     const now = input.now?.() ?? new Date();
     const state = await input.store.getProfileSyncState(identity.contactId);
-    if (state.externalCustomerId && state.snapshotVersion === 4 && !shouldRefresh(state.syncedAt, message, now)) return identity;
+    if (state.snapshotVersion === 4 && !shouldRefresh(state.syncedAt, message, now)) return identity;
     const [customersResult, leadsResult] = await Promise.allSettled([input.api.listCustomers(), input.api.listLeads()]);
     if (customersResult.status === "rejected" && leadsResult.status === "rejected") throw new Error("Nextfit identity lookup failed");
     const customers = customersResult.status === "fulfilled" ? customersResult.value : [];
@@ -22,7 +27,7 @@ export function createNextfitEnricher(input: { api: NextfitApi; store: CustomerP
     const match = lookupPersonByPhone(phoneNumber, customers, leads);
     if (match.kind !== "match") {
       return input.store.saveCustomerSnapshot({ contactId: identity.contactId, relationshipStatus: "unknown",
-        profile: { source: "nextfit", syncedAt: now.toISOString() } });
+        profile: { source: "nextfit", syncedAt: now.toISOString(), relationshipMetrics: { snapshotVersion: 4 } } });
     }
     if (match.personType === "lead") {
       const snapshot = buildSnapshot({ personType: "lead", person: match.person, contracts: [], contractBases: [], receivables: [], sales: [], agenda: [], now });

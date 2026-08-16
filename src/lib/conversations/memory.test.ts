@@ -21,12 +21,12 @@ class MemoryRepository implements ConversationRepository {
       identity = { contactId: `contact-${number}`, conversationId: `conversation-${number}`, relationshipStatus: "unknown" };
       this.contacts.set(input.phoneNumber, identity);
     }
-    if (this.providerIds.has(input.providerMessageId)) return { identity, inserted: false };
+    if (this.providerIds.has(input.providerMessageId)) return { identity, inserted: false, revision: this.providerIds.size };
     this.providerIds.add(input.providerMessageId);
     this.messages.push({ id: `message-${++this.sequence}`, conversationId: identity.conversationId,
       providerMessageId: input.providerMessageId, direction: "inbound", role: "user", content: input.content,
       createdAt: new Date(this.sequence * 1000) });
-    return { identity, inserted: true };
+    return { identity, inserted: true, revision: this.providerIds.size };
   }
   async recordOutbound(input: { conversationId: string; content: string }) {
     this.messages.push({ id: `message-${++this.sequence}`, conversationId: input.conversationId,

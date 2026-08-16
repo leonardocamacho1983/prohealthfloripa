@@ -1,11 +1,10 @@
 import { after } from "next/server";
 
-import { generateWhatsAppReply } from "@/lib/ai/generate-whatsapp-reply";
-import { handleIncomingMessage } from "@/lib/conversations/handle-incoming-message";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
+import { normalizeBrazilianPhoneNumber } from "@/lib/conversations/phone";
+import { adaptiveBatchDelaySeconds } from "@/lib/conversations/turn-planning";
+import { enqueueWhatsAppTurn } from "@/lib/conversations/turn-queue";
 import { logProcessingEvent } from "@/lib/observability/safe-log";
-import { NextfitClient } from "@/lib/nextfit/client";
-import { createNextfitEnricher } from "@/lib/nextfit/sync-customer";
 import { ZernioWhatsAppProvider } from "@/lib/whatsapp/zernio-provider";
 import {
   parseZernioWebhook,
@@ -16,12 +15,11 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function POST(request: Request) {
-  const aiGatewayApiKey = process.env.AI_GATEWAY_API_KEY;
   const apiKey = process.env.ZERNIO_API_KEY;
   const webhookSecret = process.env.ZERNIO_WEBHOOK_SECRET;
   const databaseUrl = process.env.DATABASE_URL;
 
-  if (!aiGatewayApiKey || !apiKey || !webhookSecret || !databaseUrl) {
+  if (!apiKey || !webhookSecret || !databaseUrl) {
     console.error("Webhook configuration is incomplete");
     return Response.json({ error: "Webhook unavailable" }, { status: 503 });
   }
@@ -59,51 +57,38 @@ export async function POST(request: Request) {
     messageId: message.messageId,
   });
 
-  after(async () => {
-    try {
-      const provider = new ZernioWhatsAppProvider(apiKey);
-      const repository = new NeonConversationRepository();
-      const nextfitApiKey = process.env.NEXTFIT_API_KEY;
-      const result = await handleIncomingMessage({
-        accountId: message.accountId,
-        providerConversationId: message.conversationId,
-        providerEventId: message.eventId,
-        providerMessageId: message.messageId,
-        phoneNumber: message.sender.phoneNumber ?? message.sender.id,
-        text: message.text,
-        repository,
-        provider,
-        generateReply: generateWhatsAppReply,
-        ...(process.env.HANDOFF_ATTENDANT_PHONE && process.env.ZERNIO_HANDOFF_TEMPLATE_NAME ? {
-          notifyHandoff: async ({ conversationId, firstName, reason, summary }) => {
-            const baseUrl = process.env.APP_URL ?? "https://prohealthfloripa.vercel.app";
-            await provider.sendTemplate({ accountId: message.accountId,
-              participantId: process.env.HANDOFF_ATTENDANT_PHONE!,
-              templateName: process.env.ZERNIO_HANDOFF_TEMPLATE_NAME!,
-              templateLanguage: process.env.ZERNIO_HANDOFF_TEMPLATE_LANGUAGE ?? "pt_BR",
-              templateParams: [firstName ?? "Cliente", reason, summary,
-                `${baseUrl}/handoff?conversation=${conversationId}`],
-              idempotencyKey: `handoff-notification-${message.eventId}` });
-          },
-        } : {}),
-        ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey), store: repository }) } : {}),
-      });
-
-      logProcessingEvent("info", {
-        event: "WhatsApp message processing completed",
-        eventId: message.eventId,
-        messageId: message.messageId,
-        result,
-      });
-    } catch (error) {
-      logProcessingEvent("error", {
-        event: "WhatsApp message processing failed",
-        eventId: message.eventId,
-        messageId: message.messageId,
-        error: error instanceof Error ? error.name : "UnknownError",
-      });
+  const delaySeconds = adaptiveBatchDelaySeconds(message.text);
+  try {
+    const repository = new NeonConversationRepository();
+    const inbound = await repository.recordInbound({
+      phoneNumber: normalizeBrazilianPhoneNumber(message.sender.phoneNumber ?? message.sender.id),
+      providerMessageId: message.messageId,
+      content: message.text,
+      providerAccountId: message.accountId,
+      providerConversationId: message.conversationId,
+      settleAt: new Date(Date.now() + delaySeconds * 1000),
+    });
+    if (inbound.conversationStatus !== "human_requested" && inbound.conversationStatus !== "human_active") {
+      await enqueueWhatsAppTurn({ conversationId: inbound.identity.conversationId,
+        observedRevision: inbound.revision }, delaySeconds);
+      if (inbound.inserted) {
+        after(async () => {
+          try {
+            await new ZernioWhatsAppProvider(apiKey).sendTypingIndicator({ accountId: message.accountId,
+              conversationId: message.conversationId });
+          } catch (error) {
+            console.warn("WhatsApp typing indicator failed", { error: error instanceof Error ? error.name : "UnknownError" });
+          }
+        });
+      }
     }
-  });
+    logProcessingEvent("info", { event: "WhatsApp message durably queued", eventId: message.eventId,
+      messageId: message.messageId, result: inbound.inserted ? "queued" : "duplicate_requeued" });
+  } catch (error) {
+    logProcessingEvent("error", { event: "WhatsApp message ingestion failed", eventId: message.eventId,
+      messageId: message.messageId, error: error instanceof Error ? error.name : "UnknownError" });
+    return Response.json({ error: "Temporary ingestion failure" }, { status: 503 });
+  }
 
   return Response.json({ received: true });
 }

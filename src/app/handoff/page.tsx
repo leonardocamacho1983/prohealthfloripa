@@ -46,6 +46,7 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
     <HandoffLiveRefresh />
     <header className={styles.header}><div><p className={styles.eyebrow}>ProHealth</p><h1>Atendimento</h1></div>
       <div className={styles.headerActions}><span className={styles.queueCount}>{conversations.length} {conversations.length === 1 ? "conversa" : "conversas"}</span>
+        <form action="/api/catalog/sync" method="post"><button className={styles.logout}>Atualizar catálogo</button></form>
         <form action="/api/handoff/logout" method="post"><button className={styles.logout}>Sair</button></form></div></header>
     <div className={styles.workspace}>
       <aside className={styles.queue} aria-label="Conversas">

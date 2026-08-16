@@ -23,6 +23,7 @@ Crie um `.env.local` a partir do `.env.example` e preencha localmente:
 - `ZERNIO_HANDOFF_TEMPLATE_NAME`: nome do template aprovado para avisar a Bia sobre um novo atendimento.
 - `ZERNIO_HANDOFF_TEMPLATE_LANGUAGE`: idioma do template; por padrão, `pt_BR`.
 - `APP_URL`: URL pública da aplicação, por exemplo `https://prohealthfloripa.vercel.app`.
+- `CRON_SECRET`: segredo forte usado exclusivamente pela Vercel para autenticar a sincronização diária do catálogo.
 
 ## Verificação
 
@@ -34,7 +35,7 @@ npm run build
 
 ## Deploy na Vercel
 
-Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, cadastre as variáveis Zernio e faça um novo deploy. A aplicação aplica a evolução idempotente de `migrations/0002_handoffs.sql` automaticamente no primeiro acesso; o arquivo permanece versionado para auditoria e execução manual, se desejado.
+Use Node.js 22 ou superior. Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, cadastre as variáveis Zernio e `CRON_SECRET` e faça um novo deploy. A Vercel provisiona o consumidor de Queue descrito em `vercel.json`; não é necessária uma credencial adicional para a fila. A aplicação aplica de forma idempotente as evoluções de banco versionadas em `migrations/0002_handoffs.sql`, `migrations/0003_conversation_orchestration.sql` e `migrations/0004_nextfit_catalog_cache.sql` no primeiro uso.
 
 ## Zernio Sandbox
 
@@ -45,7 +46,7 @@ Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`,
 5. Use o teste de webhook da Zernio para confirmar HTTP 200.
 6. Envie uma mensagem de texto do telefone ativado para o número compartilhado da sandbox. Dentro da janela de atendimento de 24 horas, a mensagem receberá uma resposta gerada pelo modelo através do AI Gateway.
 
-As 12 mensagens mais recentes formam a memória curta. O Neon guarda contatos, conversas, mensagens e um snapshot normalizado da Nextfit em `customer_profiles`. Em **Vercel → Project → Logs**, filtre por `/api/webhooks/zernio`. Os logs não incluem texto, telefone, payload ou credenciais.
+As mensagens recebidas em sequência são agrupadas por alguns segundos e processadas como um único turno. O Neon controla revisões, lease e idempotência; a Vercel Queue executa o turno com retry. Uma resposta calculada para uma revisão antiga é descartada antes do envio, e a revisão nova considera todos os pedidos acumulados. Em **Vercel → Project → Logs**, filtre por `/api/webhooks/zernio` para ingestão e `/api/queues/whatsapp-turn` para processamento. Os logs não incluem texto, telefone, payload ou credenciais.
 
 ## Contexto Nextfit
 
@@ -60,6 +61,8 @@ A integração usa exclusivamente os endpoints `GET` oficiais:
 A API não oferece filtro por telefone, portanto clientes e leads são paginados e comparados localmente por número brasileiro normalizado e exato. Resultados ausentes ou ambíguos permanecem `unknown`. Um registro de lead vira `lead`; um cliente com contrato vigente vira `customer`; cliente inativo ou apenas com contratos históricos vira `former_customer`. A API pública atual não sustenta uma classificação distinta de `prospect`, por isso ela não é inventada.
 
 O snapshot geral é reutilizado por 6 horas. Perguntas sobre agenda, contrato ou financeiro podem atualizá-lo depois de 15 minutos. Dados voláteis com mais de 24 horas não são enviados ao modelo. A aplicação não grava nada na Nextfit e continua respondendo se o serviço estiver indisponível.
+
+Os nomes ativos de contratos/produtos são copiados para um cache derivado no Neon, mantendo a Nextfit como fonte oficial. A sincronização ocorre diariamente pela Vercel Cron e pode ser antecipada pelo botão **Atualizar catálogo** na caixa de atendimento. Como a API pública atual da Nextfit não documenta webhook de alteração de catálogo, nenhum payload de webhook foi inventado. O cache confirma somente nome e existência; preço, duração e benefício continuam vindo de dados explicitamente confirmados.
 
 Para testar, envie uma mensagem pelo número de WhatsApp que também esteja cadastrado na Nextfit. Perguntas como “quando vence meu plano?” ou “quando é minha próxima visita?” usam o snapshot atual quando esses dados existirem. Confirme a execução nos logs da Vercel e, no Neon, verifique `contacts.relationship_status`, `customer_profiles.external_customer_id`, `source` e `synced_at`.
 
