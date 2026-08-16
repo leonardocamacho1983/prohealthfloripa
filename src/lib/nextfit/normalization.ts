@@ -68,6 +68,7 @@ export function buildSnapshot(input: {
   const customerSince = input.person.dataCadastro;
   const contractExpirations = activeContracts.map((contract) => new Date(contract.expiresAt)).sort((a, b) => a.getTime() - b.getTime());
   const relationshipMetrics = {
+    snapshotVersion: 2,
     daysAsCustomer: Math.max(0, dayDifference(now, new Date(customerSince))),
     relationshipAnniversaryDate: customerSince.slice(5, 10),
     ...(attended[0] ? { daysSinceLastVisit: dayDifference(now, attended[0].date) } : {}),

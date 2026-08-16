@@ -84,12 +84,14 @@ export class NeonConversationRepository implements ConversationRepository, Custo
 
   async getProfileSyncState(contactId: string) {
     const sql = getDatabase();
-    const rows = await sql`SELECT external_customer_id, synced_at FROM customer_profiles WHERE contact_id=${contactId} LIMIT 1` as Array<{ external_customer_id: string | null; synced_at: Date | null }>;
+    const rows = await sql`SELECT external_customer_id, synced_at, relationship_metrics->>'snapshotVersion' snapshot_version
+      FROM customer_profiles WHERE contact_id=${contactId} LIMIT 1` as Array<{ external_customer_id: string | null; synced_at: Date | null; snapshot_version: string | null }>;
     const row = rows[0];
     if (!row) return {};
     return {
       ...(row.synced_at ? { syncedAt: new Date(row.synced_at).toISOString() } : {}),
       ...(row.external_customer_id ? { externalCustomerId: row.external_customer_id } : {}),
+      ...(row.snapshot_version ? { snapshotVersion: Number(row.snapshot_version) } : {}),
     };
   }
 

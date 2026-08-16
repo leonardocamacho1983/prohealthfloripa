@@ -23,7 +23,7 @@ export interface ConversationRepository {
 }
 
 export interface CustomerProfileStore {
-  getProfileSyncState(contactId: string): Promise<{ syncedAt?: string; externalCustomerId?: string }>;
+  getProfileSyncState(contactId: string): Promise<{ syncedAt?: string; externalCustomerId?: string; snapshotVersion?: number }>;
   saveCustomerSnapshot(input: {
     contactId: string; firstName?: string; relationshipStatus: RelationshipStatus;
     profile: CustomerProfile & { externalCustomerId?: string; source: "nextfit" };
