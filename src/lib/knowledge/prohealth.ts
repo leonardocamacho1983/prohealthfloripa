@@ -53,21 +53,26 @@ export const proHealthKnowledge = {
         tenSessions: "10 sessões / 70 dias: R$ 2.700",
       },
     },
-    registeredTechniques: [
-      "Ayurvédica",
-      "Desportiva",
-      "Drenagem",
-      "Express",
-      "Lomi-Lomi",
+    traditionalTechniques: [
       "Miofascial",
       "Relaxante",
+      "Drenagem linfática",
       "Shiatsu",
+      "Desportiva",
       "Sueca",
-      "Thai",
+      "Lomi-Lomi",
+      "Tuiná",
+    ],
+    specialTechniques: [
+      { name: "Ayurvédica / Thai", duration: "1h" },
+      { name: "Abhyanga", duration: "1h" },
+      { name: "Shiro Abhyanga", duration: "30 min" },
+      { name: "Pada Abhyanga", duration: "30 min" },
+      { name: "Shirodhara", duration: "50 min" },
+      { name: "Bastis localizados", duration: "1h" },
+      { name: "Massagem Indiana, método tatame", duration: "1h" },
     ],
     expressDuration: "30 minutos",
-    classification:
-      "A classificação de cada técnica como tradicional ou especial ainda precisa ser confirmada com a equipe.",
   },
   recovery: {
     iceBath: "Banheira de gelo avulsa: R$ 70",
@@ -106,7 +111,7 @@ export const proHealthKnowledge = {
     unannouncedAbsence: "Em caso de falta sem aviso, a sessão pode ser remarcada em até 30 dias.",
     refund: "Reembolso é possível mediante atestado ou situação de força maior. Não interpretar automaticamente força maior; em caso de dúvida, encaminhar para a equipe.",
   },
-  pendingInformation: ["classificação das massagens tradicionais e especiais"],
+  pendingInformation: [],
   clinicalSafety: {
     guidance:
       "Não diagnosticar, prescrever ou afirmar aptidão clínica. Em caso de condição médica, gestação, cirurgia recente, lesão relevante, problema cardiovascular, trombose, alteração importante de pressão ou dúvida sobre crioterapia, massagem ou exercício, orientar confirmação prévia com a equipe ou profissional responsável.",

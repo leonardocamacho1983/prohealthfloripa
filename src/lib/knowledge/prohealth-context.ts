@@ -56,12 +56,17 @@ function policyContext(): string {
 function massageContext(): string {
   const item = knowledge.massages;
   return `MASSAGENS — FATOS CONFIRMADOS:
-- Avulsa tradicional: ${item.single.traditional}; avulsa especial: ${item.single.special}.
-- Tradicionais: ${item.packages.traditional.fiveSessions}; ${item.packages.traditional.tenSessions}.
-- Especiais: ${item.packages.special.fiveSessions}; ${item.packages.special.tenSessions}.
-- Técnicas cadastradas: ${item.registeredTechniques.join(", ")}.
+- Categoria tradicional/clássica: ${item.traditionalTechniques.join(", ")}.
+- Valor avulso tradicional/clássica: ${item.single.traditional}.
+- Pacotes tradicional/clássica: ${item.packages.traditional.fiveSessions}; ${item.packages.traditional.tenSessions}.
+- Categoria especial: ${item.specialTechniques.map((technique) => `${technique.name} (${technique.duration})`).join(", ")}.
+- Valor avulso especial: ${item.single.special}.
+- Pacotes especial: ${item.packages.special.fiveSessions}; ${item.packages.special.tenSessions}.
 - Massagem Express: ${item.expressDuration}.
-- ${item.classification} Nunca classificar uma técnica por conta própria.`;
+- Responder diretamente qual é a categoria das técnicas listadas acima.
+- Thai e Ayurvédica pertencem à categoria especial e custam ${item.single.special} no avulso.
+- Não inventar técnicas, classificações, durações ou benefícios além dos fatos confirmados.
+- Descrever benefícios de forma geral e prudente, sem promessa clínica absoluta.`;
 }
 
 function recoveryContext(): string {
@@ -102,7 +107,7 @@ const RESPONSE_RULES = `REGRAS DE RESPOSTA:
 - Responder apenas ao que foi perguntado; não despejar todos os planos sem necessidade.
 - Nunca inventar informação ausente, disponibilidade ou ação realizada.
 - Não diagnosticar, prescrever, afirmar aptidão clínica nem prometer resultado médico.
-- Informações pendentes: ${knowledge.pendingInformation.join("; ")}.
+- Informações pendentes: ${knowledge.pendingInformation.join("; ") || "nenhuma informação comercial pendente cadastrada"}.
 - Para qualquer informação pendente, dizer naturalmente que precisa confirmar com a equipe.
 - Segurança clínica: ${knowledge.clinicalSafety.guidance}`;
 
@@ -151,6 +156,11 @@ export function buildProHealthInstructions(userMessage: string): string {
       "drenagem",
       "miofascial",
       "ayurvedica",
+      "abhyanga",
+      "shirodhara",
+      "basti",
+      "tuina",
+      "indiana",
       "tradicional",
       "especial",
     ])

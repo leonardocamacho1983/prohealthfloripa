@@ -26,11 +26,11 @@ const scenarios = [
   },
   {
     question: "Quanto custa massagem Thai?",
-    expected: ["Thai", "precisa ser confirmada com a equipe", "Nunca classificar"],
+    expected: ["Thai e Ayurvédica pertencem à categoria especial", "R$ 300"],
   },
   {
     question: "Qual a diferença entre tradicional e especial?",
-    expected: ["tradicional: R$ 270", "especial: R$ 300", "precisa ser confirmada com a equipe"],
+    expected: ["Valor avulso tradicional/clássica: R$ 270", "Valor avulso especial: R$ 300"],
   },
   {
     question: "Vocês abrem sábado?",
@@ -93,3 +93,25 @@ test("removes the obsolete claim that prices are unavailable", () => {
     /não (?:tenho|tem|possui|possuímos) acesso (?:a|aos) preços/i,
   );
 });
+
+const massageScenarios = [
+  ["Quanto custa massagem desportiva?", ["Desportiva", "tradicional/clássica", "R$ 270"]],
+  ["Thai é tradicional ou especial?", ["Thai e Ayurvédica pertencem à categoria especial", "R$ 300"]],
+  ["Quanto custa Lomi-Lomi?", ["Lomi-Lomi", "tradicional/clássica", "R$ 270"]],
+  ["Quanto custa Abhyanga?", ["Abhyanga (1h)", "Valor avulso especial: R$ 300"]],
+  ["Qual a duração do Shirodhara?", ["Shirodhara (50 min)", "categoria especial"]],
+  ["Compare massagem clássica e especial", [
+    "Valor avulso tradicional/clássica: R$ 270",
+    "5 sessões / 40 dias: R$ 1.215",
+    "Valor avulso especial: R$ 300",
+    "10 sessões / 70 dias: R$ 2.700",
+  ]],
+] as const;
+
+for (const [question, expected] of massageScenarios) {
+  test(`includes confirmed massage classification for: ${question}`, () => {
+    const instructions = buildProHealthInstructions(question);
+    for (const value of expected) assert.ok(instructions.includes(value), `Expected instructions to include: ${value}`);
+    assert.doesNotMatch(instructions, /classificação.+precisa ser confirmada/i);
+  });
+}
