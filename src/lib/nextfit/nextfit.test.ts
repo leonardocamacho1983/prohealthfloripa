@@ -82,3 +82,23 @@ test("17. snapshot sem vínculo não impede nova consulta de identidade", async 
   await enrich({ identity, phoneNumber: "+5548999991234", message: "Quando vence meu plano?" });
   assert.equal(customerQueries, 1);
 });
+test("18. falha de fonte opcional não descarta contrato disponível", async () => {
+  let savedContractCount = 0;
+  const identity: ConversationIdentity = { contactId: "c", conversationId: "v", relationshipStatus: "unknown" };
+  const enrich = createNextfitEnricher({
+    api: {
+      async listCustomers() { return [person()]; }, async listLeads() { return []; },
+      async listContracts() { return [{ id: 1, codigoCliente: 1, codigoContratoBase: 1, dataInicio: "2026-01-01", dataValidade: "2027-01-01", status: "Ativo" as const }]; },
+      async listContractBases() { return [{ id: 1, descricao: "Pilates" }]; },
+      async listReceivables() { throw new Error("unavailable"); }, async listSales() { throw new Error("unavailable"); },
+      async listAgenda() { throw new Error("unavailable"); }, async listOpportunities() { return []; },
+    },
+    store: {
+      async getProfileSyncState() { return {}; },
+      async saveCustomerSnapshot(input) { savedContractCount = (input.profile.activeContracts as unknown[]).length; return identity; },
+    },
+    now: () => now,
+  });
+  await enrich({ identity, phoneNumber: "+5548999991234", message: "Quando vence meu plano?" });
+  assert.equal(savedContractCount, 1);
+});

@@ -13,13 +13,23 @@ export class NextfitClient implements NextfitApi {
   constructor(private readonly apiKey: string) {}
 
   private async getPage<T>(path: string, params: URLSearchParams): Promise<Paged<T>> {
-    const response = await fetch(`${NEXTFIT_API_BASE_URL}${path}?${params}`, {
-      headers: { "X-Api-Key": this.apiKey, Accept: "application/json" },
-      signal: AbortSignal.timeout(10_000),
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error(`Nextfit request failed with HTTP ${response.status}`);
-    return response.json() as Promise<Paged<T>>;
+    try {
+      const response = await fetch(`${NEXTFIT_API_BASE_URL}${path}?${params}`, {
+        headers: { "X-Api-Key": this.apiKey, Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        console.warn("Nextfit API request rejected", { endpoint: path, status: response.status });
+        throw new Error(`Nextfit HTTP ${response.status}`);
+      }
+      return response.json() as Promise<Paged<T>>;
+    } catch (error) {
+      if (!(error instanceof Error && error.message.startsWith("Nextfit HTTP"))) {
+        console.warn("Nextfit API request failed", { endpoint: path, error: error instanceof Error ? error.name : "UnknownError" });
+      }
+      throw error;
+    }
   }
 
   private async all<T>(path: string, input: Record<string, string> = {}): Promise<T[]> {

@@ -15,7 +15,10 @@ export function createNextfitEnricher(input: { api: NextfitApi; store: CustomerP
     const now = input.now?.() ?? new Date();
     const state = await input.store.getProfileSyncState(identity.contactId);
     if (state.externalCustomerId && !shouldRefresh(state.syncedAt, message, now)) return identity;
-    const [customers, leads] = await Promise.all([input.api.listCustomers(), input.api.listLeads()]);
+    const [customersResult, leadsResult] = await Promise.allSettled([input.api.listCustomers(), input.api.listLeads()]);
+    if (customersResult.status === "rejected" && leadsResult.status === "rejected") throw new Error("Nextfit identity lookup failed");
+    const customers = customersResult.status === "fulfilled" ? customersResult.value : [];
+    const leads = leadsResult.status === "fulfilled" ? leadsResult.value : [];
     const match = lookupPersonByPhone(phoneNumber, customers, leads);
     if (match.kind !== "match") {
       return input.store.saveCustomerSnapshot({ contactId: identity.contactId, relationshipStatus: "unknown",
@@ -28,10 +31,16 @@ export function createNextfitEnricher(input: { api: NextfitApi; store: CustomerP
     }
     const from = new Date(now); from.setUTCDate(from.getUTCDate() - 90);
     const to = new Date(now); to.setUTCDate(to.getUTCDate() + 90);
-    const [contracts, contractBases, receivables, sales, agenda] = await Promise.all([
+    const results = await Promise.allSettled([
       input.api.listContracts(match.person.id), input.api.listContractBases(), input.api.listReceivables(match.person.id),
       input.api.listSales(match.person.id), input.api.listAgenda(from, to),
     ]);
+    const [contractsResult, basesResult, receivablesResult, salesResult, agendaResult] = results;
+    const contracts = contractsResult.status === "fulfilled" ? contractsResult.value : [];
+    const contractBases = basesResult.status === "fulfilled" ? basesResult.value : [];
+    const receivables = receivablesResult.status === "fulfilled" ? receivablesResult.value : [];
+    const sales = salesResult.status === "fulfilled" ? salesResult.value : [];
+    const agenda = agendaResult.status === "fulfilled" ? agendaResult.value : [];
     const snapshot = buildSnapshot({ personType: "customer", person: match.person, contracts, contractBases, receivables, sales, agenda, now });
     return input.store.saveCustomerSnapshot({ contactId: identity.contactId, firstName: snapshot.firstName,
       relationshipStatus: snapshot.relationshipStatus, profile: snapshot });
