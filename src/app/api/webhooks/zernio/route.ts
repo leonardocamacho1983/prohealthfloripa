@@ -1,6 +1,9 @@
 import { after } from "next/server";
 
 import { generateWhatsAppReply } from "@/lib/ai/generate-whatsapp-reply";
+import { handleIncomingMessage } from "@/lib/conversations/handle-incoming-message";
+import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
+import { logProcessingEvent } from "@/lib/observability/safe-log";
 import { ZernioWhatsAppProvider } from "@/lib/whatsapp/zernio-provider";
 import {
   parseZernioWebhook,
@@ -14,8 +17,9 @@ export async function POST(request: Request) {
   const aiGatewayApiKey = process.env.AI_GATEWAY_API_KEY;
   const apiKey = process.env.ZERNIO_API_KEY;
   const webhookSecret = process.env.ZERNIO_WEBHOOK_SECRET;
+  const databaseUrl = process.env.DATABASE_URL;
 
-  if (!aiGatewayApiKey || !apiKey || !webhookSecret) {
+  if (!aiGatewayApiKey || !apiKey || !webhookSecret || !databaseUrl) {
     console.error("Webhook configuration is incomplete");
     return Response.json({ error: "Webhook unavailable" }, { status: 503 });
   }
@@ -55,21 +59,28 @@ export async function POST(request: Request) {
 
   after(async () => {
     try {
-      const reply = await generateWhatsAppReply(message.text);
       const provider = new ZernioWhatsAppProvider(apiKey);
-      await provider.sendText({
+      const result = await handleIncomingMessage({
         accountId: message.accountId,
-        conversationId: message.conversationId,
-        idempotencyKey: `zernio-webhook-${message.eventId}`,
-        text: reply,
+        providerConversationId: message.conversationId,
+        providerEventId: message.eventId,
+        providerMessageId: message.messageId,
+        phoneNumber: message.sender.phoneNumber ?? message.sender.id,
+        text: message.text,
+        repository: new NeonConversationRepository(),
+        provider,
+        generateReply: generateWhatsAppReply,
       });
 
-      console.info("AI WhatsApp reply sent", {
+      logProcessingEvent("info", {
+        event: "WhatsApp message processing completed",
         eventId: message.eventId,
         messageId: message.messageId,
+        result,
       });
     } catch (error) {
-      console.error("AI WhatsApp reply failed", {
+      logProcessingEvent("error", {
+        event: "WhatsApp message processing failed",
         eventId: message.eventId,
         messageId: message.messageId,
         error: error instanceof Error ? error.name : "UnknownError",
