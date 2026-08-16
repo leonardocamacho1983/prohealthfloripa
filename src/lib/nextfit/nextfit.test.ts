@@ -19,6 +19,8 @@ const snapshot = (overrides: Partial<Parameters<typeof buildSnapshot>[0]> = {}) 
 
 test("1. telefone ausente permanece desconhecido", () => assert.equal(lookupPersonByPhone("+5548999990000", [person()], []).kind, "not_found"));
 test("2. cliente é localizado por telefone normalizado exato", () => assert.equal(lookupPersonByPhone("+5548999991234", [person()], []).kind, "match"));
+test("2b. formato nacional da Zernio concilia com o formato Nextfit", () => assert.equal(lookupPersonByPhone("48999991234", [person()], []).kind, "match"));
+test("2c. máscara nacional concilia com o formato internacional", () => assert.equal(lookupPersonByPhone("(48) 99999-1234", [person()], []).kind, "match"));
 test("3. lead é identificado", () => {
   const result = lookupPersonByPhone("+5548999991234", [], [person()]);
   assert.equal(result.kind === "match" && result.personType, "lead");

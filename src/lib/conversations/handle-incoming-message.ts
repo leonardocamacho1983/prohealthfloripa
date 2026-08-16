@@ -1,6 +1,6 @@
 import { buildCustomerContext, type CustomerContext } from "../customer-context/index.ts";
 import type { WhatsAppProvider } from "../whatsapp/provider.ts";
-import { normalizePhoneNumber } from "./phone.ts";
+import { normalizeBrazilianPhoneNumber } from "./phone.ts";
 import type { ConversationRepository } from "./types.ts";
 
 export async function handleIncomingMessage(input: {
@@ -10,13 +10,13 @@ export async function handleIncomingMessage(input: {
   enrichCustomer?: (input: { identity: Awaited<ReturnType<ConversationRepository["recordInbound"]>>["identity"]; phoneNumber: string; message: string }) => Promise<Awaited<ReturnType<ConversationRepository["recordInbound"]>>["identity"]>;
 }): Promise<"duplicate" | "replied"> {
   const inbound = await input.repository.recordInbound({
-    phoneNumber: normalizePhoneNumber(input.phoneNumber), providerMessageId: input.providerMessageId, content: input.text,
+    phoneNumber: normalizeBrazilianPhoneNumber(input.phoneNumber), providerMessageId: input.providerMessageId, content: input.text,
   });
   if (!inbound.inserted) return "duplicate";
   let identity = inbound.identity;
   if (input.enrichCustomer) {
     try {
-      identity = await input.enrichCustomer({ identity, phoneNumber: normalizePhoneNumber(input.phoneNumber), message: input.text });
+      identity = await input.enrichCustomer({ identity, phoneNumber: normalizeBrazilianPhoneNumber(input.phoneNumber), message: input.text });
     } catch (error) {
       // Nextfit is optional enrichment: messaging must remain available on provider failure.
       console.warn("Customer enrichment failed", { error: error instanceof Error ? error.name : "UnknownError" });

@@ -1,4 +1,5 @@
 import { normalizeBrazilianPhone } from "./phone.ts";
+import { brazilianPhoneCandidates } from "../conversations/phone.ts";
 import type { NextfitAgenda, NextfitContract, NextfitContractBase, NextfitLookup, NextfitPerson, NextfitReceivable, NextfitSale, NextfitSnapshot } from "./types.ts";
 
 const ACTIVE_CONTRACT_STATUSES = new Set(["Ativo", "Suspenso", "Bloqueado", "Agendado"]);
@@ -7,10 +8,19 @@ const dayDifference = (later: Date, earlier: Date) => Math.floor((later.getTime(
 const firstName = (name?: string | null) => name?.trim().split(/\s+/)[0] || undefined;
 
 export function lookupPersonByPhone(phone: string, customers: NextfitPerson[], leads: NextfitPerson[]): NextfitLookup {
-  const matches = [
+  const people = [
     ...customers.map((person) => ({ personType: "customer" as const, person })),
     ...leads.map((person) => ({ personType: "lead" as const, person })),
-  ].filter(({ person }) => normalizeBrazilianPhone(person.dddFone, person.fone) === phone);
+  ];
+  const canonical = brazilianPhoneCandidates(phone)[0];
+  let matches = people.filter(({ person }) => normalizeBrazilianPhone(person.dddFone, person.fone) === canonical);
+  if (matches.length === 0) {
+    const incomingCandidates = new Set(brazilianPhoneCandidates(phone));
+    matches = people.filter(({ person }) => {
+      const stored = normalizeBrazilianPhone(person.dddFone, person.fone);
+      return stored ? brazilianPhoneCandidates(stored).some((candidate) => incomingCandidates.has(candidate)) : false;
+    });
+  }
   if (matches.length === 0) return { kind: "not_found" };
   if (matches.length > 1) return { kind: "ambiguous", count: matches.length };
   return { kind: "match", ...matches[0]! };
