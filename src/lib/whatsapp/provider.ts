@@ -8,4 +8,6 @@ export type SendTextMessage = {
 export interface WhatsAppProvider {
   sendText(message: SendTextMessage): Promise<void>;
   sendTypingIndicator?(input: { accountId: string; conversationId: string }): Promise<void>;
+  sendTemplate?(input: { accountId: string; participantId: string; templateName: string;
+    templateLanguage: string; templateParams: string[]; idempotencyKey: string }): Promise<void>;
 }

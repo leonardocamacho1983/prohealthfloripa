@@ -74,6 +74,18 @@ export async function POST(request: Request) {
         repository,
         provider,
         generateReply: generateWhatsAppReply,
+        ...(process.env.HANDOFF_ATTENDANT_PHONE && process.env.ZERNIO_HANDOFF_TEMPLATE_NAME ? {
+          notifyHandoff: async ({ conversationId, firstName, reason, summary }) => {
+            const baseUrl = process.env.APP_URL ?? "https://prohealthfloripa.vercel.app";
+            await provider.sendTemplate({ accountId: message.accountId,
+              participantId: process.env.HANDOFF_ATTENDANT_PHONE!,
+              templateName: process.env.ZERNIO_HANDOFF_TEMPLATE_NAME!,
+              templateLanguage: process.env.ZERNIO_HANDOFF_TEMPLATE_LANGUAGE ?? "pt_BR",
+              templateParams: [firstName ?? "Cliente", reason, summary,
+                `${baseUrl}/handoff?conversation=${conversationId}`],
+              idempotencyKey: `handoff-notification-${message.eventId}` });
+          },
+        } : {}),
         ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey), store: repository }) } : {}),
       });
 

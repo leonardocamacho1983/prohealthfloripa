@@ -51,4 +51,18 @@ export class ZernioWhatsAppProvider implements WhatsAppProvider {
       throw new Error(`Zernio send failed with HTTP ${response.status}`);
     }
   }
+
+  async sendTemplate(input: { accountId: string; participantId: string; templateName: string;
+    templateLanguage: string; templateParams: string[]; idempotencyKey: string }): Promise<void> {
+    const response = await this.fetcher(`${ZERNIO_API_BASE_URL}/v1/inbox/conversations`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json",
+        "Idempotency-Key": input.idempotencyKey },
+      body: JSON.stringify({ accountId: input.accountId, participantId: input.participantId,
+        templateName: input.templateName, templateLanguage: input.templateLanguage,
+        templateParams: input.templateParams }),
+      signal: AbortSignal.timeout(3_500),
+    });
+    if (!response.ok) throw new Error(`Zernio template send failed with HTTP ${response.status}`);
+  }
 }

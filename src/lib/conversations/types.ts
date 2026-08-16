@@ -16,7 +16,7 @@ export type CustomerProfile = {
   relationshipMetrics?: unknown; syncedAt?: string;
 };
 export interface ConversationRepository {
-  recordInbound(input: { phoneNumber: string; providerMessageId: string; content: string }): Promise<{ identity: ConversationIdentity; inserted: boolean }>;
+  recordInbound(input: { phoneNumber: string; providerMessageId: string; content: string; providerAccountId?: string; providerConversationId?: string }): Promise<{ identity: ConversationIdentity; inserted: boolean; conversationStatus?: ConversationStatus; humanExpiresAt?: Date }>;
   recordOutbound(input: { conversationId: string; content: string }): Promise<void>;
   getRecentMessages(conversationId: string, limit: number): Promise<ConversationMessage[]>;
   getCustomerProfile(contactId: string): Promise<CustomerProfile | undefined>;

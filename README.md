@@ -18,6 +18,11 @@ Crie um `.env.local` a partir do `.env.example` e preencha localmente:
 - `NEXTFIT_API_KEY`: chave da API pública da Nextfit. É usada somente no servidor pelo cabeçalho `X-Api-Key`.
 - `ZERNIO_API_KEY`: chave de API da Zernio com permissão de escrita no Inbox.
 - `ZERNIO_WEBHOOK_SECRET`: segredo forte definido por você e repetido na configuração do webhook da Zernio.
+- `HANDOFF_ACCESS_SECRET`: chave forte usada pela Bia para entrar na caixa de atendimentos em `/handoff`.
+- `HANDOFF_ATTENDANT_PHONE`: telefone da Bia em formato internacional, sem espaços (ex.: `55...`).
+- `ZERNIO_HANDOFF_TEMPLATE_NAME`: nome do template aprovado para avisar a Bia sobre um novo atendimento.
+- `ZERNIO_HANDOFF_TEMPLATE_LANGUAGE`: idioma do template; por padrão, `pt_BR`.
+- `APP_URL`: URL pública da aplicação, por exemplo `https://prohealthfloripa.vercel.app`.
 
 ## Verificação
 
@@ -29,7 +34,7 @@ npm run build
 
 ## Deploy na Vercel
 
-Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, cadastre as variáveis Zernio e faça um novo deploy. Aplique `migrations/0001_customer_context.sql` uma vez no banco antes de testar mensagens.
+Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, cadastre as variáveis Zernio e faça um novo deploy. A aplicação aplica a evolução idempotente de `migrations/0002_handoffs.sql` automaticamente no primeiro acesso; o arquivo permanece versionado para auditoria e execução manual, se desejado.
 
 ## Zernio Sandbox
 
@@ -57,3 +62,9 @@ A API não oferece filtro por telefone, portanto clientes e leads são paginados
 O snapshot geral é reutilizado por 6 horas. Perguntas sobre agenda, contrato ou financeiro podem atualizá-lo depois de 15 minutos. Dados voláteis com mais de 24 horas não são enviados ao modelo. A aplicação não grava nada na Nextfit e continua respondendo se o serviço estiver indisponível.
 
 Para testar, envie uma mensagem pelo número de WhatsApp que também esteja cadastrado na Nextfit. Perguntas como “quando vence meu plano?” ou “quando é minha próxima visita?” usam o snapshot atual quando esses dados existirem. Confirme a execução nos logs da Vercel e, no Neon, verifique `contacts.relationship_status`, `customer_profiles.external_customer_id`, `source` e `synced_at`.
+
+## Atendimento humano
+
+Quando o cliente pede uma pessoa ou a conversa entra em uma regra sensível, o agente confirma a transferência e fica em silêncio. A Bia responde em `https://prohealthfloripa.vercel.app/handoff`; a mensagem continua saindo pelo número principal da ProHealth. Ao encerrar, o agente volta a atender. Se não houver mensagem por uma hora, o atendimento humano expira automaticamente.
+
+Para receber o aviso no WhatsApp da Bia, crie na Zernio um template utilitário com quatro variáveis, nesta ordem: **nome do cliente**, **motivo**, **resumo** e **link da conversa**. Cadastre o nome e o idioma nas variáveis acima. A notificação é opcional: mesmo sem o template, as conversas aparecem na caixa protegida.
