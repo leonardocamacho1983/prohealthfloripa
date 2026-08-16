@@ -10,6 +10,7 @@ ALTER TABLE conversations
   ADD COLUMN IF NOT EXISTS handoff_requested_at timestamptz,
   ADD COLUMN IF NOT EXISTS human_started_at timestamptz,
   ADD COLUMN IF NOT EXISTS human_expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS human_last_viewed_at timestamptz,
   ADD COLUMN IF NOT EXISTS closed_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS conversations_handoff_queue_idx

@@ -15,7 +15,7 @@ function ensureHandoffSchema(): Promise<void> {
         ADD COLUMN IF NOT EXISTS provider_conversation_id text, ADD COLUMN IF NOT EXISTS handoff_reason text,
         ADD COLUMN IF NOT EXISTS handoff_source text, ADD COLUMN IF NOT EXISTS handoff_requested_at timestamptz,
         ADD COLUMN IF NOT EXISTS human_started_at timestamptz, ADD COLUMN IF NOT EXISTS human_expires_at timestamptz,
-        ADD COLUMN IF NOT EXISTS closed_at timestamptz`,
+        ADD COLUMN IF NOT EXISTS human_last_viewed_at timestamptz, ADD COLUMN IF NOT EXISTS closed_at timestamptz`,
       tx`DROP INDEX IF EXISTS conversations_one_active_per_contact`,
       tx`CREATE UNIQUE INDEX IF NOT EXISTS conversations_one_open_per_contact ON conversations(contact_id)
         WHERE status IN ('active','human_requested','human_active')`,
@@ -91,6 +91,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
       provider_conversation_id=${input.providerConversationId}, handoff_reason=${input.reason}, handoff_source=${input.source},
       handoff_requested_at=COALESCE(handoff_requested_at, ${now}), human_expires_at=NULL,
       summary=${input.summary}, updated_at=now() WHERE id=${input.conversationId}`;
+    await this.recordHandoffEvent(input.conversationId, `handoff_requested:${input.source}`);
   }
 
   async listHandoffs(): Promise<HandoffConversation[]> {
@@ -98,17 +99,23 @@ export class NeonConversationRepository implements ConversationRepository, Custo
     await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
       WHERE status='human_active' AND human_expires_at <= now()`;
     const rows = await sql`SELECT c.id, c.contact_id, ct.first_name, ct.phone_number, c.status, c.handoff_reason,
-      c.handoff_source, c.summary, c.handoff_requested_at, c.human_expires_at, c.provider_account_id, c.provider_conversation_id
+      c.handoff_source, c.summary, c.handoff_requested_at, c.human_started_at, c.human_expires_at,
+      c.last_message_at, c.provider_account_id, c.provider_conversation_id,
+      (SELECT count(*)::int FROM messages m WHERE m.conversation_id=c.id AND m.direction='inbound'
+        AND m.created_at > COALESCE(c.human_last_viewed_at, c.handoff_requested_at, c.created_at)) unread_count
       FROM conversations c JOIN contacts ct ON ct.id=c.contact_id
       WHERE c.status IN ('human_requested','human_active') ORDER BY c.handoff_requested_at ASC` as Array<{
         id: string; contact_id: string; first_name: string | null; phone_number: string; status: "human_requested" | "human_active";
         handoff_reason: string | null; handoff_source: HandoffSource | null; summary: string | null; handoff_requested_at: Date | null;
-        human_expires_at: Date | null; provider_account_id: string | null; provider_conversation_id: string | null;
+        human_started_at: Date | null; human_expires_at: Date | null; last_message_at: Date; unread_count: number;
+        provider_account_id: string | null; provider_conversation_id: string | null;
       }>;
     return Promise.all(rows.map(async (row) => ({ id: row.id, contactId: row.contact_id,
       ...(row.first_name ? { firstName: row.first_name } : {}), maskedPhone: maskPhone(row.phone_number), status: row.status,
       reason: row.handoff_reason ?? "Atendimento humano solicitado.", source: row.handoff_source ?? "customer",
       summary: row.summary ?? "Resumo indisponível.", requestedAt: new Date(row.handoff_requested_at ?? new Date()),
+      lastActivityAt: new Date(row.last_message_at), ...(row.human_started_at ? { humanStartedAt: new Date(row.human_started_at) } : {}),
+      unreadCount: row.unread_count,
       ...(row.human_expires_at ? { expiresAt: new Date(row.human_expires_at) } : {}), providerAccountId: row.provider_account_id ?? "",
       providerConversationId: row.provider_conversation_id ?? "", messages: await this.getRecentMessages(row.id, 30) })));
   }
@@ -117,6 +124,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
     await ensureHandoffSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='human_active', human_started_at=COALESCE(human_started_at, now()),
       human_expires_at=now() + interval '12 hours', updated_at=now() WHERE id=${conversationId} AND status='human_requested'`;
+    await this.recordHandoffEvent(conversationId, "handoff_taken");
   }
 
   async touchHandoff(conversationId: string) {
@@ -129,6 +137,20 @@ export class NeonConversationRepository implements ConversationRepository, Custo
     await ensureHandoffSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='closed', closed_at=now(), human_expires_at=NULL, updated_at=now()
       WHERE id=${conversationId} AND status IN ('human_requested','human_active')`;
+    await this.recordHandoffEvent(conversationId, "handoff_closed");
+  }
+
+  async markHandoffViewed(conversationId: string) {
+    await ensureHandoffSchema(); const sql = getDatabase();
+    await sql`UPDATE conversations SET human_last_viewed_at=now(), updated_at=now()
+      WHERE id=${conversationId} AND status IN ('human_requested','human_active')`;
+  }
+
+  async recordHandoffEvent(conversationId: string, eventType: string) {
+    const sql = getDatabase();
+    await sql`INSERT INTO interaction_events (contact_id, event_type, metadata)
+      SELECT contact_id, ${eventType}, jsonb_build_object('conversationId', id)
+      FROM conversations WHERE id=${conversationId}`;
   }
 
   async recordOutbound(input: { conversationId: string; content: string }) {

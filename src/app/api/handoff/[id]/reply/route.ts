@@ -18,5 +18,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     conversationId: conversation.providerConversationId, idempotencyKey: `human-${randomUUID()}`, text: text.trim() });
   await repository.recordOutbound({ conversationId: id, content: text.trim() });
   await repository.touchHandoff(id);
+  await repository.recordHandoffEvent(id, "handoff_replied");
   return NextResponse.redirect(new URL(`/handoff?conversation=${id}`, request.url), 303);
 }

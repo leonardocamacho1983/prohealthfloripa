@@ -14,3 +14,10 @@ export function isValidHandoffSession(value: string | undefined, secret: string 
   const left = Buffer.from(value); const right = Buffer.from(expected);
   return left.length === right.length && timingSafeEqual(left, right);
 }
+
+export function isValidHandoffAccessKey(value: string | undefined, secret: string | undefined): boolean {
+  if (!value || !secret) return false;
+  const left = Buffer.from(createHmac("sha256", secret).update(value).digest("hex"));
+  const right = Buffer.from(createHmac("sha256", secret).update(secret).digest("hex"));
+  return timingSafeEqual(left, right);
+}

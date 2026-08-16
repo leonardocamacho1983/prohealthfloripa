@@ -67,4 +67,6 @@ Para testar, envie uma mensagem pelo número de WhatsApp que também esteja cada
 
 Quando o cliente pede uma pessoa ou a conversa entra em uma regra sensível, o agente confirma a transferência e fica em silêncio. A espera não expira, inclusive fora do horário de atendimento. A Bia responde em `https://prohealthfloripa.vercel.app/handoff`; a mensagem continua saindo pelo número principal da ProHealth. Ao encerrar, o agente volta a atender. Como proteção contra atendimentos esquecidos abertos, somente uma conversa já assumida expira após 12 horas sem atividade.
 
+A caixa atualiza automaticamente a cada 15 segundos, separa conversas aguardando e assumidas, destaca novas mensagens e exige confirmação antes de devolver o atendimento ao agente. As ações de solicitar, assumir, responder e encerrar são registradas como eventos operacionais sem copiar o conteúdo das mensagens para o log de auditoria.
+
 Para receber o aviso no WhatsApp da Bia, crie na Zernio um template utilitário com quatro variáveis, nesta ordem: **nome do cliente**, **motivo**, **resumo** e **link da conversa**. Cadastre o nome e o idioma nas variáveis acima. A notificação é opcional: mesmo sem o template, as conversas aparecem na caixa protegida.

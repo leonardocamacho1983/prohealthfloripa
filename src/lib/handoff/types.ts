@@ -12,7 +12,10 @@ export type HandoffConversation = {
   source: HandoffSource;
   summary: string;
   requestedAt: Date;
+  lastActivityAt: Date;
+  humanStartedAt?: Date;
   expiresAt?: Date;
+  unreadCount: number;
   messages: ConversationMessage[];
   providerAccountId: string;
   providerConversationId: string;
@@ -26,4 +29,6 @@ export interface HandoffStore {
   takeHandoff(conversationId: string): Promise<void>;
   touchHandoff(conversationId: string): Promise<void>;
   closeHandoff(conversationId: string): Promise<void>;
+  markHandoffViewed(conversationId: string): Promise<void>;
+  recordHandoffEvent(conversationId: string, eventType: string): Promise<void>;
 }

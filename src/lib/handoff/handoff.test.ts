@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isValidHandoffSession, handoffSessionValue } from "./auth.ts";
+import { isValidHandoffAccessKey, isValidHandoffSession, handoffSessionValue } from "./auth.ts";
 import { detectHandoffRequest } from "./detection.ts";
 import { buildHandoffSummary } from "./summary.ts";
 import { handleIncomingMessage } from "../conversations/handle-incoming-message.ts";
@@ -32,6 +32,11 @@ test("handoff session only accepts the correct secret-derived cookie", () => {
   assert.equal(isValidHandoffSession(value, "outro-segredo"), false);
 });
 
+test("access key comparison rejects an incorrect key", () => {
+  assert.equal(isValidHandoffAccessKey("correta", "correta"), true);
+  assert.equal(isValidHandoffAccessKey("incorreta", "correta"), false);
+});
+
 function flowFixture(status: ConversationStatus = "active") {
   const messages: ConversationMessage[] = []; const sent: string[] = []; let handoffRequested = false;
   const repository = {
@@ -46,6 +51,7 @@ function flowFixture(status: ConversationStatus = "active") {
     async getRecentMessages() { return messages; }, async getCustomerProfile() { return undefined; },
     async requestHandoff() { handoffRequested = true; }, async getConversationState() { return { status }; },
     async listHandoffs() { return []; }, async takeHandoff() {}, async touchHandoff() {}, async closeHandoff() {},
+    async markHandoffViewed() {}, async recordHandoffEvent() {},
   };
   const provider = { async sendText(input: { text: string }) { sent.push(input.text); } };
   return { repository, provider, sent, wasRequested: () => handoffRequested };
