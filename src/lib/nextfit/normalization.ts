@@ -58,6 +58,9 @@ export function buildSnapshot(input: {
   const activeContracts = input.contracts.filter((contract) => ACTIVE_CONTRACT_STATUSES.has(contract.status) && new Date(contract.dataValidade) >= now)
     .map((contract) => ({ name: bases.get(contract.codigoContratoBase) ?? "Contrato", status: contract.status,
       startsAt: contract.dataInicio, expiresAt: contract.dataValidade }));
+  const activeContractValues = input.contracts.filter((contract) => ACTIVE_CONTRACT_STATUSES.has(contract.status) && new Date(contract.dataValidade) >= now && typeof contract.valorTotal === "number")
+    .map((contract) => ({ name: bases.get(contract.codigoContratoBase) ?? "Contrato", contractTotal: contract.valorTotal,
+      recurring: contract.recorrente ?? false }));
   const services = [...new Set(input.sales.filter((sale) => sale.status === "Concluida" && sale.descricao).map((sale) => sale.descricao!.trim()))].slice(0, 8);
   const previousContracts = input.contracts.filter((contract) => !activeContracts.some((active) => active.startsAt === contract.dataInicio && active.expiresAt === contract.dataValidade))
     .slice(0, 5).map((contract) => ({ name: bases.get(contract.codigoContratoBase) ?? "Contrato", status: contract.status,
@@ -68,7 +71,7 @@ export function buildSnapshot(input: {
   const customerSince = input.person.dataCadastro;
   const contractExpirations = activeContracts.map((contract) => new Date(contract.expiresAt)).sort((a, b) => a.getTime() - b.getTime());
   const relationshipMetrics = {
-    snapshotVersion: 2,
+    snapshotVersion: 3,
     daysAsCustomer: Math.max(0, dayDifference(now, new Date(customerSince))),
     relationshipAnniversaryDate: customerSince.slice(5, 10),
     ...(attended[0] ? { daysSinceLastVisit: dayDifference(now, attended[0].date) } : {}),
@@ -93,6 +96,7 @@ export function buildSnapshot(input: {
       ...(lastPayment ? { lastPayment: { amount: lastPayment.receberRecebimento!.valorRecebido,
         paidAt: lastPayment.receberRecebimento!.dataRecebimento,
         ...(lastPayment.descricao ? { description: lastPayment.descricao } : {}) } } : {}),
+      ...(activeContractValues.length ? { activeContractValues } : {}),
       ...(overdue.length ? { maximumDaysOverdue: Math.max(...overdue.map((item) => dayDifference(now, new Date(item.dataVencimento)))) } : {}) },
     syncedAt: now.toISOString(),
   };

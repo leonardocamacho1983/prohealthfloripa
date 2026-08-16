@@ -18,7 +18,7 @@ export async function generateWhatsAppReply(input: {
     .join("\n");
   const { text } = await generateText({
     model: MODEL,
-    instructions: `${buildProHealthInstructions(relevantText)}\n\nCONTEXTO NORMALIZADO (campos ausentes são desconhecidos; nunca invente; use dados pessoais de modo natural e somente quando ajudarem a resposta):\n${customerContextForModel(input.context)}`,
+    instructions: `${buildProHealthInstructions(relevantText)}\n\nCONTEXTO NORMALIZADO (campos ausentes são desconhecidos; nunca invente; use dados pessoais de modo natural e somente quando ajudarem a resposta; contractTotal é o valor total registrado do contrato e não deve ser descrito como último pagamento):\n${customerContextForModel(input.context)}`,
     messages: input.context.conversation.recentMessages.map((message) => ({
       role: message.role,
       content: message.content,

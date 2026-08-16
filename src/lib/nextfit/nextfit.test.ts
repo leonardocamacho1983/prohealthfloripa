@@ -117,3 +117,10 @@ test("20. valor financeiro só chega ao modelo quando solicitado explicitamente"
     content: "Qual foi o último valor que eu paguei?", createdAt: now }];
   assert.equal(buildModelCustomerContext(base, now).includes("420"), true);
 });
+test("21. valor total do contrato é identificado sem ser confundido com pagamento", () => {
+  const result = snapshot({ contracts: [{ id: 1, codigoCliente: 1, codigoContratoBase: 1, dataInicio: "2026-01-01",
+    dataValidade: "2027-01-01", status: "Ativo", valorTotal: 4320, recorrente: false }],
+    contractBases: [{ id: 1, descricao: "Pilates anual" }] });
+  assert.deepEqual((result.relationshipMetrics as { activeContractValues: unknown }).activeContractValues,
+    [{ name: "Pilates anual", contractTotal: 4320, recurring: false }]);
+});

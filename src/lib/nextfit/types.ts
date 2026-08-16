@@ -15,6 +15,8 @@ export type NextfitContract = {
   dataInicio: string;
   dataValidade: string;
   dataEncerramento?: string | null;
+  valorTotal?: number;
+  recorrente?: boolean;
   status: "Ativo" | "Cancelado" | "Encerrado" | "Suspenso" | "Bloqueado" | "Agendado" | "Erro";
   modalidades?: Array<{ tipo: "Periodo" | "Sessao" | "PacoteAulas"; codigoModalidade: number }> | null;
 };
