@@ -4,7 +4,7 @@ import type {
 } from "./types.ts";
 
 const NEXTFIT_API_BASE_URL = "https://integracao.nextfit.com.br/api/v1";
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 30;
 const MAX_PAGES = 100;
 
 type Paged<T> = { items?: T[] | null; temProximaPagina: boolean };
