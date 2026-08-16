@@ -52,6 +52,8 @@ export function buildSnapshot(input: {
   const attendanceDenominator = last90.filter((event) => ["Presente", "Falta", "FaltaJustificada"].includes(event.status)).length;
   const openReceivables = input.receivables.filter((item) => item.status === "Aberto");
   const overdue = openReceivables.filter((item) => new Date(item.dataVencimento) < now);
+  const lastPayment = input.receivables.filter((item) => item.status === "Recebido" && item.receberRecebimento)
+    .sort((a, b) => new Date(b.receberRecebimento!.dataRecebimento).getTime() - new Date(a.receberRecebimento!.dataRecebimento).getTime())[0];
   const bases = new Map(input.contractBases.map((base) => [base.id, base.descricao]));
   const activeContracts = input.contracts.filter((contract) => ACTIVE_CONTRACT_STATUSES.has(contract.status) && new Date(contract.dataValidade) >= now)
     .map((contract) => ({ name: bases.get(contract.codigoContratoBase) ?? "Contrato", status: contract.status,
@@ -87,6 +89,9 @@ export function buildSnapshot(input: {
       ...(attendanceDenominator ? { attendanceRatio: last90.filter((event) => event.status === "Presente").length / attendanceDenominator } : {}) },
     relationshipMetrics: { ...relationshipMetrics, overdueCount: overdue.length,
       ...(openReceivables.length ? { nextDueAt: openReceivables.map((item) => item.dataVencimento).sort()[0] } : {}),
+      ...(lastPayment ? { lastPayment: { amount: lastPayment.receberRecebimento!.valorRecebido,
+        paidAt: lastPayment.receberRecebimento!.dataRecebimento,
+        ...(lastPayment.descricao ? { description: lastPayment.descricao } : {}) } } : {}),
       ...(overdue.length ? { maximumDaysOverdue: Math.max(...overdue.map((item) => dayDifference(now, new Date(item.dataVencimento)))) } : {}) },
     syncedAt: now.toISOString(),
   };

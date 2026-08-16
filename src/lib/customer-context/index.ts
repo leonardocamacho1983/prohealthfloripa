@@ -32,6 +32,12 @@ export function prepareConversationSummary(messages: ConversationMessage[]): str
 export function buildModelCustomerContext(context: CustomerContext, now = new Date()): string {
   const profile = context.customer;
   const fresh = profile.syncedAt ? now.getTime() - new Date(profile.syncedAt).getTime() <= 24 * 3_600_000 : false;
+  const latestUserMessage = context.conversation.recentMessages.filter((message) => message.role === "user").at(-1)?.content ?? "";
+  const asksForPaymentAmount = /(quanto|valor).*(paguei|pagamento|cobran[cç]a|mensalidade)|(?:paguei|pagamento|cobran[cç]a|mensalidade).*(quanto|valor)/i.test(latestUserMessage);
+  const relationshipMetrics = profile.relationshipMetrics && typeof profile.relationshipMetrics === "object"
+    ? { ...(profile.relationshipMetrics as Record<string, unknown>) } : undefined;
+  const lastPayment = relationshipMetrics?.lastPayment;
+  if (relationshipMetrics) delete relationshipMetrics.lastPayment;
   return JSON.stringify({
     identity: context.identity,
     conversation: { ...(context.conversation.summary ? { summary: context.conversation.summary } : {}), ...(context.conversation.openIntent ? { openIntent: context.conversation.openIntent } : {}) },
@@ -43,7 +49,8 @@ export function buildModelCustomerContext(context: CustomerContext, now = new Da
       ...(fresh && profile.activeContracts ? { activeContracts: profile.activeContracts } : {}),
       ...(profile.consumedServicesSummary ? { consumedServicesSummary: profile.consumedServicesSummary } : {}),
       ...(profile.attendanceMetrics ? { attendanceMetrics: profile.attendanceMetrics } : {}),
-      ...(fresh && profile.relationshipMetrics ? { relationshipMetrics: profile.relationshipMetrics } : {}),
+      ...(fresh && relationshipMetrics ? { relationshipMetrics } : {}),
+      ...(fresh && asksForPaymentAmount && lastPayment ? { requestedFinancialDetail: { lastPayment } } : {}),
     },
   });
 }

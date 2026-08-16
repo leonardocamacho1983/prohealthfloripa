@@ -102,3 +102,18 @@ test("18. falha de fonte opcional não descarta contrato disponível", async () 
   await enrich({ identity, phoneNumber: "+5548999991234", message: "Quando vence meu plano?" });
   assert.equal(savedContractCount, 1);
 });
+test("19. último pagamento é derivado sem dados do método de pagamento", () => {
+  const result = snapshot({ receivables: [{ id: 1, codigoCliente: 1, dataVencimento: "2026-08-01", descricao: "Pilates",
+    status: "Recebido", receberRecebimento: { dataRecebimento: "2026-08-02T12:00:00Z", valorRecebido: 420 } }] });
+  assert.deepEqual((result.relationshipMetrics as { lastPayment: unknown }).lastPayment,
+    { amount: 420, paidAt: "2026-08-02T12:00:00Z", description: "Pilates" });
+});
+test("20. valor financeiro só chega ao modelo quando solicitado explicitamente", () => {
+  const base: CustomerContext = { identity: { relationshipStatus: "customer" }, conversation: { recentMessages: [] },
+    customer: { syncedAt: now.toISOString(), relationshipMetrics: { daysAsCustomer: 10,
+      lastPayment: { amount: 420, paidAt: "2026-08-02T12:00:00Z" } } } };
+  assert.equal(buildModelCustomerContext(base, now).includes("420"), false);
+  base.conversation.recentMessages = [{ id: "m", conversationId: "v", direction: "inbound", role: "user",
+    content: "Qual foi o último valor que eu paguei?", createdAt: now }];
+  assert.equal(buildModelCustomerContext(base, now).includes("420"), true);
+});

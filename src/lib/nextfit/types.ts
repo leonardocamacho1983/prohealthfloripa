@@ -21,7 +21,9 @@ export type NextfitContract = {
 
 export type NextfitContractBase = { id: number; descricao?: string | null };
 export type NextfitReceivable = {
-  id: number; codigoCliente: number; dataVencimento: string;
+  id: number; codigoCliente: number; dataVencimento: string; dataHora?: string;
+  valor?: number; descricao?: string | null;
+  receberRecebimento?: { dataRecebimento: string; valorRecebido: number } | null;
   status: "Aberto" | "Recebido" | "Cancelado" | "Renegociado" | "EmAndamento";
 };
 export type NextfitSale = {
