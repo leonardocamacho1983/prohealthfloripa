@@ -21,6 +21,13 @@ export type HandoffConversation = {
   providerConversationId: string;
 };
 
+export type InboxConversation = Omit<HandoffConversation, "status" | "reason" | "source" | "requestedAt"> & {
+  status: ConversationStatus;
+  reason?: string;
+  source?: HandoffSource;
+  requestedAt?: Date;
+};
+
 export interface HandoffStore {
   getConversationState(conversationId: string): Promise<{ status: ConversationStatus; expiresAt?: Date }>;
   requestHandoff(input: { conversationId: string; providerAccountId: string; providerConversationId: string;

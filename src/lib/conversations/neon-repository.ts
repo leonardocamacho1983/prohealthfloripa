@@ -1,7 +1,7 @@
 import { getDatabase } from "@/lib/db/neon";
 import type { ConversationIdentity, ConversationMessage, ConversationRepository, CustomerProfile, CustomerProfileStore, RelationshipStatus } from "./types";
 import type { ConversationStatus } from "./types";
-import type { HandoffConversation, HandoffSource, HandoffStore } from "../handoff/types";
+import type { HandoffConversation, HandoffSource, HandoffStore, InboxConversation } from "../handoff/types";
 
 type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; conversation_status: ConversationStatus; human_expires_at: Date | null; inserted: boolean };
 type ProfileRow = { customer_since: string | null; date_of_birth: string | null; financial_status: string | null; last_visit_at: Date | null; next_visit_at: Date | null; active_contracts: unknown | null; consumed_services_summary: unknown | null; attendance_metrics: unknown | null; relationship_metrics: unknown | null; synced_at: Date | null };
@@ -120,6 +120,47 @@ export class NeonConversationRepository implements ConversationRepository, Custo
       providerConversationId: row.provider_conversation_id ?? "", messages: await this.getRecentMessages(row.id, 30) })));
   }
 
+  async listInboxConversations(limit = 100): Promise<InboxConversation[]> {
+    await ensureHandoffSchema(); const sql = getDatabase();
+    await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
+      WHERE status='human_active' AND human_expires_at <= now()`;
+    const rows = await sql`SELECT c.id, c.contact_id, ct.first_name, ct.phone_number, c.status, c.handoff_reason,
+      c.handoff_source, c.summary, c.handoff_requested_at, c.human_started_at, c.human_expires_at,
+      c.last_message_at, c.provider_account_id, c.provider_conversation_id,
+      (SELECT count(*)::int FROM messages m WHERE m.conversation_id=c.id AND m.direction='inbound'
+        AND m.created_at > COALESCE(c.human_last_viewed_at, c.handoff_requested_at, c.created_at)) unread_count
+      FROM conversations c JOIN contacts ct ON ct.id=c.contact_id
+      ORDER BY c.last_message_at DESC LIMIT ${limit}` as Array<{
+        id: string; contact_id: string; first_name: string | null; phone_number: string; status: ConversationStatus;
+        handoff_reason: string | null; handoff_source: HandoffSource | null; summary: string | null;
+        handoff_requested_at: Date | null; human_started_at: Date | null; human_expires_at: Date | null;
+        last_message_at: Date; unread_count: number; provider_account_id: string | null; provider_conversation_id: string | null;
+      }>;
+    return Promise.all(rows.map(async (row) => ({ id: row.id, contactId: row.contact_id,
+      ...(row.first_name ? { firstName: row.first_name } : {}), maskedPhone: maskPhone(row.phone_number), status: row.status,
+      ...(row.handoff_reason ? { reason: row.handoff_reason } : {}),
+      ...(row.handoff_source ? { source: row.handoff_source } : {}),
+      ...(row.handoff_requested_at ? { requestedAt: new Date(row.handoff_requested_at) } : {}),
+      summary: row.summary ?? "Conversa conduzida pelo agente.", lastActivityAt: new Date(row.last_message_at),
+      ...(row.human_started_at ? { humanStartedAt: new Date(row.human_started_at) } : {}), unreadCount: row.unread_count,
+      ...(row.human_expires_at ? { expiresAt: new Date(row.human_expires_at) } : {}),
+      providerAccountId: row.provider_account_id ?? "", providerConversationId: row.provider_conversation_id ?? "",
+      messages: await this.getRecentMessages(row.id, 30) })));
+  }
+
+  async assumeAgentConversation(conversationId: string) {
+    await ensureHandoffSchema(); const sql = getDatabase();
+    const rows = await sql`UPDATE conversations SET status='human_active', handoff_reason='Conversa assumida pela equipe.',
+      handoff_source='customer', handoff_requested_at=COALESCE(handoff_requested_at, now()),
+      human_started_at=now(), human_expires_at=now() + interval '12 hours',
+      summary=COALESCE(summary, 'Conversa assumida diretamente pelo painel.'), updated_at=now()
+      WHERE id=${conversationId} AND status='active'
+        AND provider_account_id IS NOT NULL AND provider_conversation_id IS NOT NULL
+      RETURNING id` as Array<{ id: string }>;
+    if (!rows[0]) throw new Error("Active conversation not found");
+    await this.recordHandoffEvent(conversationId, "handoff_taken_from_agent");
+  }
+
   async takeHandoff(conversationId: string) {
     await ensureHandoffSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='human_active', human_started_at=COALESCE(human_started_at, now()),
@@ -143,7 +184,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
   async markHandoffViewed(conversationId: string) {
     await ensureHandoffSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET human_last_viewed_at=now(), updated_at=now()
-      WHERE id=${conversationId} AND status IN ('human_requested','human_active')`;
+      WHERE id=${conversationId}`;
   }
 
   async recordHandoffEvent(conversationId: string, eventType: string) {
