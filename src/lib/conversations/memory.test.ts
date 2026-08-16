@@ -116,6 +116,19 @@ test("database failure stops before sending a reply", async () => {
   assert.equal(provider.sent.length, 0);
 });
 
+test("social messages skip enrichment and AI generation", async () => {
+  const repository = new MemoryRepository(); const provider = new MemoryProvider();
+  let enriched = false; let generated = false;
+  await handleIncomingMessage({ accountId: "account", providerConversationId: "provider-conversation",
+    providerEventId: "event-social", providerMessageId: "social", phoneNumber: "+5548999999999",
+    text: "obrigdao", repository, provider,
+    enrichCustomer: async ({ identity }) => { enriched = true; return identity; },
+    generateReply: async () => { generated = true; return "AI"; } });
+  assert.equal(enriched, false);
+  assert.equal(generated, false);
+  assert.equal(provider.sent[0], "De nada 🙂 Se precisar, é só me chamar.");
+});
+
 test("safe logs omit phone, message content, tokens, and API keys", () => {
   const original = console.info; const calls: unknown[] = [];
   console.info = (...args: unknown[]) => { calls.push(args); };

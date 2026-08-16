@@ -2,6 +2,7 @@ import { buildCustomerContext, type CustomerContext } from "../customer-context/
 import type { WhatsAppProvider } from "../whatsapp/provider.ts";
 import { normalizeBrazilianPhoneNumber } from "./phone.ts";
 import type { ConversationRepository } from "./types.ts";
+import { buildSocialReply, classifySocialMessage } from "./social-message.ts";
 
 export async function handleIncomingMessage(input: {
   accountId: string; providerConversationId: string; providerEventId: string; providerMessageId: string;
@@ -21,7 +22,8 @@ export async function handleIncomingMessage(input: {
     }
   }
   let identity = inbound.identity;
-  if (input.enrichCustomer) {
+  const socialMessageKind = classifySocialMessage(input.text);
+  if (input.enrichCustomer && !socialMessageKind) {
     try {
       identity = await input.enrichCustomer({ identity, phoneNumber: normalizeBrazilianPhoneNumber(input.phoneNumber), message: input.text });
     } catch (error) {
@@ -30,7 +32,9 @@ export async function handleIncomingMessage(input: {
     }
   }
   const context = await buildCustomerContext(input.repository, identity);
-  const reply = await input.generateReply({ message: input.text, context });
+  const reply = socialMessageKind
+    ? buildSocialReply(socialMessageKind, context.identity.firstName)
+    : await input.generateReply({ message: input.text, context });
   await input.provider.sendText({ accountId: input.accountId, conversationId: input.providerConversationId,
     idempotencyKey: `zernio-webhook-${input.providerEventId}`, text: reply });
   await input.repository.recordOutbound({ conversationId: inbound.identity.conversationId, content: reply });
