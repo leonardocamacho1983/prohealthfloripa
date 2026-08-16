@@ -7,4 +7,5 @@ export type SendTextMessage = {
 
 export interface WhatsAppProvider {
   sendText(message: SendTextMessage): Promise<void>;
+  sendTypingIndicator?(input: { accountId: string; conversationId: string }): Promise<void>;
 }

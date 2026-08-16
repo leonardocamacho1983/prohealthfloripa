@@ -13,6 +13,13 @@ export async function handleIncomingMessage(input: {
     phoneNumber: normalizeBrazilianPhoneNumber(input.phoneNumber), providerMessageId: input.providerMessageId, content: input.text,
   });
   if (!inbound.inserted) return "duplicate";
+  if (input.provider.sendTypingIndicator) {
+    try {
+      await input.provider.sendTypingIndicator({ accountId: input.accountId, conversationId: input.providerConversationId });
+    } catch (error) {
+      console.warn("WhatsApp typing indicator failed", { error: error instanceof Error ? error.name : "UnknownError" });
+    }
+  }
   let identity = inbound.identity;
   if (input.enrichCustomer) {
     try {
