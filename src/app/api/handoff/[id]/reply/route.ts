@@ -13,6 +13,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const repository = new NeonConversationRepository();
   const conversation = (await repository.listHandoffs()).find((item) => item.id === id);
   if (!conversation || !conversation.providerAccountId || !conversation.providerConversationId) return new NextResponse("Not found", { status: 404 });
+  if (conversation.status === "human_requested") await repository.takeHandoff(id);
   await new ZernioWhatsAppProvider(apiKey).sendText({ accountId: conversation.providerAccountId,
     conversationId: conversation.providerConversationId, idempotencyKey: `human-${randomUUID()}`, text: text.trim() });
   await repository.recordOutbound({ conversationId: id, content: text.trim() });

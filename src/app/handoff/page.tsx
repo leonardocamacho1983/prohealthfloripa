@@ -25,7 +25,9 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
       </aside>
       <section className={styles.detail}>
         {!selected ? <div className={styles.noSelection}><h2>Nenhuma conversa selecionada</h2><p>Os pedidos de atendimento humano aparecerão aqui.</p></div> : <>
-          <div className={styles.detailHeader}><div><h2>{selected.firstName ?? "Cliente"}</h2><p>{selected.maskedPhone} · expira às {formatTime(selected.expiresAt)}</p></div>
+          <div className={styles.detailHeader}><div><h2>{selected.firstName ?? "Cliente"}</h2><p>{selected.maskedPhone} · {selected.status === "human_requested"
+            ? `aguardando desde ${formatTime(selected.requestedAt)}`
+            : `proteção até ${selected.expiresAt ? formatTime(selected.expiresAt) : "—"}`}</p></div>
             <span className={styles.status}>{selected.status === "human_active" ? "Em atendimento" : "Aguardando"}</span></div>
           <div className={styles.summary}><strong>Resumo para atendimento</strong><p>{selected.summary}</p></div>
           <div className={styles.messages}>{selected.messages.map((message) => <div key={message.id}

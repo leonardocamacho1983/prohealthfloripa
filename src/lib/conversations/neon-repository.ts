@@ -32,7 +32,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
     const sql = getDatabase();
     await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
       WHERE contact_id IN (SELECT id FROM contacts WHERE phone_number=${input.phoneNumber})
-        AND status IN ('human_requested','human_active') AND human_expires_at <= now()`;
+        AND status='human_active' AND human_expires_at <= now()`;
     const rows = await sql`
       WITH contact AS (
         INSERT INTO contacts (phone_number) VALUES (${input.phoneNumber})
@@ -56,7 +56,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
         UPDATE conversations SET last_message_at=now(), updated_at=now(),
           provider_account_id=COALESCE(${input.providerAccountId ?? null}, provider_account_id),
           provider_conversation_id=COALESCE(${input.providerConversationId ?? null}, provider_conversation_id),
-          human_expires_at=CASE WHEN status IN ('human_requested','human_active') THEN now() + interval '1 hour' ELSE human_expires_at END
+          human_expires_at=CASE WHEN status='human_active' THEN now() + interval '12 hours' ELSE human_expires_at END
         WHERE id IN (SELECT conversation_id FROM inbound)
       )
       SELECT contact.id contact_id, conversation.id conversation_id, contact.first_name,
@@ -77,7 +77,7 @@ export class NeonConversationRepository implements ConversationRepository, Custo
     await ensureHandoffSchema();
     const sql = getDatabase();
     const rows = await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
-      WHERE id=${conversationId} AND status IN ('human_requested','human_active') AND human_expires_at <= now()
+      WHERE id=${conversationId} AND status='human_active' AND human_expires_at <= now()
       RETURNING status, human_expires_at` as Array<{ status: ConversationStatus; human_expires_at: Date | null }>;
     const current = rows[0] ?? (await sql`SELECT status, human_expires_at FROM conversations WHERE id=${conversationId} LIMIT 1` as Array<{ status: ConversationStatus; human_expires_at: Date | null }>)[0];
     if (!current) throw new Error("Conversation not found");
@@ -89,14 +89,14 @@ export class NeonConversationRepository implements ConversationRepository, Custo
     await ensureHandoffSchema(); const sql = getDatabase(); const now = input.now ?? new Date();
     await sql`UPDATE conversations SET status='human_requested', provider_account_id=${input.providerAccountId},
       provider_conversation_id=${input.providerConversationId}, handoff_reason=${input.reason}, handoff_source=${input.source},
-      handoff_requested_at=COALESCE(handoff_requested_at, ${now}), human_expires_at=${new Date(now.getTime() + 3_600_000)},
+      handoff_requested_at=COALESCE(handoff_requested_at, ${now}), human_expires_at=NULL,
       summary=${input.summary}, updated_at=now() WHERE id=${input.conversationId}`;
   }
 
   async listHandoffs(): Promise<HandoffConversation[]> {
     await ensureHandoffSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
-      WHERE status IN ('human_requested','human_active') AND human_expires_at <= now()`;
+      WHERE status='human_active' AND human_expires_at <= now()`;
     const rows = await sql`SELECT c.id, c.contact_id, ct.first_name, ct.phone_number, c.status, c.handoff_reason,
       c.handoff_source, c.summary, c.handoff_requested_at, c.human_expires_at, c.provider_account_id, c.provider_conversation_id
       FROM conversations c JOIN contacts ct ON ct.id=c.contact_id
@@ -109,20 +109,20 @@ export class NeonConversationRepository implements ConversationRepository, Custo
       ...(row.first_name ? { firstName: row.first_name } : {}), maskedPhone: maskPhone(row.phone_number), status: row.status,
       reason: row.handoff_reason ?? "Atendimento humano solicitado.", source: row.handoff_source ?? "customer",
       summary: row.summary ?? "Resumo indisponível.", requestedAt: new Date(row.handoff_requested_at ?? new Date()),
-      expiresAt: new Date(row.human_expires_at ?? new Date()), providerAccountId: row.provider_account_id ?? "",
+      ...(row.human_expires_at ? { expiresAt: new Date(row.human_expires_at) } : {}), providerAccountId: row.provider_account_id ?? "",
       providerConversationId: row.provider_conversation_id ?? "", messages: await this.getRecentMessages(row.id, 30) })));
   }
 
   async takeHandoff(conversationId: string) {
     await ensureHandoffSchema(); const sql = getDatabase();
     await sql`UPDATE conversations SET status='human_active', human_started_at=COALESCE(human_started_at, now()),
-      human_expires_at=now() + interval '1 hour', updated_at=now() WHERE id=${conversationId} AND status='human_requested'`;
+      human_expires_at=now() + interval '12 hours', updated_at=now() WHERE id=${conversationId} AND status='human_requested'`;
   }
 
   async touchHandoff(conversationId: string) {
     await ensureHandoffSchema(); const sql = getDatabase();
-    await sql`UPDATE conversations SET human_expires_at=now() + interval '1 hour', last_message_at=now(), updated_at=now()
-      WHERE id=${conversationId} AND status IN ('human_requested','human_active')`;
+    await sql`UPDATE conversations SET human_expires_at=now() + interval '12 hours', last_message_at=now(), updated_at=now()
+      WHERE id=${conversationId} AND status='human_active'`;
   }
 
   async closeHandoff(conversationId: string) {

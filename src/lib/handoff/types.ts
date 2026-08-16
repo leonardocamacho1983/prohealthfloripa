@@ -12,7 +12,7 @@ export type HandoffConversation = {
   source: HandoffSource;
   summary: string;
   requestedAt: Date;
-  expiresAt: Date;
+  expiresAt?: Date;
   messages: ConversationMessage[];
   providerAccountId: string;
   providerConversationId: string;
