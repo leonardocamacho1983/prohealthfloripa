@@ -1,4 +1,5 @@
 import { SignOutButton } from "@clerk/nextjs";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { hasPermission } from "@/lib/auth/permissions";
@@ -24,6 +25,7 @@ import { CloseHandoffForm } from "./close-form";
 import { CustomerPanel } from "./customer-panel";
 import styles from "./handoff.module.css";
 import { HandoffLiveRefresh } from "./handoff-live";
+import { QueueLinkStatus } from "./queue-link-status";
 import { QuickReplyComposer } from "./quick-reply-composer";
 
 export const dynamic = "force-dynamic";
@@ -160,7 +162,8 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
           <p>{query ? "Tente buscar por outro nome ou telefone." : "Nenhuma conversa neste filtro."}</p>
         </div> : filtered.map((item) => {
           const stalled = isInboxConversationStalled(item, now);
-          return <a key={item.id} href={linkFor(filter, item.id)}
+          return <Link key={item.id} href={linkFor(filter, item.id)}
+            data-conversation-link="true"
             className={`${styles.queueItem} ${item.id === selected?.id ? styles.selected : ""}`}
             aria-current={item.id === selected?.id ? "page" : undefined}>
             <span className={styles.avatar}>{(item.firstName?.[0] ?? "C").toUpperCase()}</span>
@@ -175,12 +178,14 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
               {formatElapsed(item.lastActivityAt, now)}</time>
               {item.id !== selected?.id && item.unreadCount > 0
                 ? <b aria-label={`${item.unreadCount} mensagens novas`}>{item.unreadCount}</b>
-                : null}</span>
-          </a>;
+                : null}
+              <QueueLinkStatus />
+            </span>
+          </Link>;
         })}
       </aside>
 
-      <div className={styles.conversationWorkspace}>
+      <div key={selected?.id ?? "no-selection"} className={styles.conversationWorkspace}>
         <section className={styles.detail}>
           {!selected ? <div className={styles.noSelection}><h2>Nenhuma conversa selecionada</h2>
             <p>As conversas do agente e os atendimentos humanos aparecerão aqui.</p></div> : <>

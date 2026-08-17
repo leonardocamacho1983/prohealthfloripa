@@ -208,6 +208,25 @@
   color: #fff;
   font-size: 11px;
 }
+.queueLinkStatus {
+  min-width: 52px;
+  min-height: 15px;
+  color: #126a43;
+  font-size: 10px;
+  font-weight: 800;
+  opacity: 0;
+  visibility: hidden;
+}
+.queueLinkPending {
+  visibility: visible;
+  animation: queueLinkFadeIn 160ms 100ms ease forwards, queueLinkPulse 900ms 100ms ease-in-out infinite;
+}
+@keyframes queueLinkFadeIn {
+  to { opacity: 1; }
+}
+@keyframes queueLinkPulse {
+  50% { opacity: 0.45; }
+}
 .queueItem time,
 .messages time {
   font-size: 11px;
