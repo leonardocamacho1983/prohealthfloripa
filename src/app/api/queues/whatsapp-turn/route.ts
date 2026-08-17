@@ -98,6 +98,7 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
     const result = requireSettledQueueTurn(await processConversationTurn({ conversationId: message.conversationId,
       observedRevision: message.observedRevision, repository, provider,
       generateReply: generateWhatsAppReplyPlan,
+      preSendGraceMs: 1_500,
       ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey),
         store: repository }) } : {}),
       notifyHandoff }));

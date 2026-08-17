@@ -35,7 +35,10 @@ test("reset only removes prior conversational history", () => {
     ["Vamos começar do zero", "Quero massagem"]);
 });
 
-test("uses a slightly longer debounce for fragments", () => {
-  assert.equal(adaptiveBatchDelaySeconds("Ah também"), 3);
-  assert.equal(adaptiveBatchDelaySeconds("Qual é o endereço?"), 2);
+test("uses an adaptive quiet window for greetings, fragments and complete questions", () => {
+  assert.equal(adaptiveBatchDelaySeconds("Oi bom dia"), 2);
+  assert.equal(adaptiveBatchDelaySeconds("Ah também"), 9);
+  assert.equal(adaptiveBatchDelaySeconds("Dor na cervical e no ombro direito"), 9);
+  assert.equal(adaptiveBatchDelaySeconds("Qual é o endereço?"), 5);
+  assert.equal(adaptiveBatchDelaySeconds("Gostaria de conhecer os planos."), 6);
 });

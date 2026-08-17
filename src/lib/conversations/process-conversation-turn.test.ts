@@ -73,7 +73,8 @@ class TurnRepository implements ConversationTurnRepository, HandoffStore {
 class TurnProvider implements WhatsAppProvider {
   sent: string[] = [];
   typing = 0;
-  async sendText(input: { text: string }) { this.sent.push(input.text); }
+  onSend?: (text: string) => void;
+  async sendText(input: { text: string }) { this.sent.push(input.text); this.onSend?.(input.text); }
   async sendTypingIndicator() { this.typing += 1; }
 }
 
@@ -96,6 +97,37 @@ test("five rapid messages use one enrichment, one generation and one outbound se
   assert.match(consolidated, /Lomi-Lomi/); assert.match(consolidated, /Quanto custa/);
 });
 
+test("different topics may be delivered as two short WhatsApp bubbles", async () => {
+  const repository = new TurnRepository(["Quero o preço da massagem", "E também o endereço"]);
+  const provider = new TurnProvider();
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 2,
+    repository, provider, generateReply: async () => ({ messages: ["A massagem custa R$ 270.",
+      "O endereço é Rua Vera Linhares de Andrade, 2063."], answeredTopics: ["preço", "endereço"],
+      needsClarification: false, handoffRecommended: false }) });
+  assert.equal(result, "replied");
+  assert.deepEqual(provider.sent, ["A massagem custa R$ 270.",
+    "O endereço é Rua Vera Linhares de Andrade, 2063."]);
+});
+
+test("a new inbound between topical bubbles suppresses the remaining old bubble", async () => {
+  const repository = new TurnRepository(["Quero o preço da massagem", "E também o endereço"]);
+  const provider = new TurnProvider();
+  provider.onSend = () => {
+    provider.onSend = undefined;
+    repository.revision += 1;
+    repository.token = undefined;
+    repository.messages.push({ id: "late-between-bubbles", conversationId: "conversation",
+      direction: "inbound", role: "user", content: "Na verdade, quero Pilates", inputRevision: 3,
+      createdAt: new Date() });
+  };
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 2,
+    repository, provider, generateReply: async () => ({ messages: ["A massagem custa R$ 270.",
+      "O endereço é Rua Vera Linhares de Andrade, 2063."], answeredTopics: ["preço", "endereço"],
+      needsClarification: false, handoffRecommended: false }) });
+  assert.equal(result, "stale");
+  assert.deepEqual(provider.sent, ["A massagem custa R$ 270."]);
+});
+
 test("a new inbound revision invalidates a draft before provider send", async () => {
   const repository = new TurnRepository(["Qual o preço?"]); const provider = new TurnProvider();
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
@@ -106,6 +138,20 @@ test("a new inbound revision invalidates a draft before provider send", async ()
       return reply()(undefined as never);
     } });
   assert.equal(result, "stale"); assert.equal(provider.sent.length, 0);
+});
+
+test("a message arriving during the final grace window invalidates the old reply", async () => {
+  const repository = new TurnRepository(["Quero massagem hoje"]); const provider = new TurnProvider();
+  setTimeout(() => {
+    repository.revision += 1;
+    repository.token = undefined;
+    repository.messages.push({ id: "late", conversationId: "conversation", direction: "inbound", role: "user",
+      content: "Também estou com dor no ombro", inputRevision: 2, createdAt: new Date() });
+  }, 5);
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: reply("Resposta antiga"), preSendGraceMs: 20 });
+  assert.equal(result, "stale");
+  assert.equal(provider.sent.length, 0);
 });
 
 test("complete cancellation before processing emits no reply", async () => {

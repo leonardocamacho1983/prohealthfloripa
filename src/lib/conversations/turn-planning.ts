@@ -13,6 +13,8 @@ export type TurnPlan = {
 const COMPLETE_CANCELLATION = /^(?:n[aã]o\s+)?(?:precisa|preciso)\s+(?:me\s+)?responder(?:\s+(?:mais|isso))?$|^(?:n[aã]o\s+responda|pode\s+ignorar|deixa\s+pra\s+l[aá])$/i;
 const RESET = /\b(?:vamos|quero|pode)\s+(?:come[cç]ar|recome[cç]ar)\s+(?:do\s+zero|de\s+novo)\b/i;
 const REPAIR = /^(?:oi+|ol[aá]|al[oô]|travou|funcionou|est[aá]\s+a[ií]|\?+)$/i;
+const SOCIAL_GREETING = /^(?:(?:oi+|ol[aá])\s+)?(?:bom\s+dia|boa\s+tarde|boa\s+noite)[!?.\s🙂😊👋]*$|^(?:oi+|ol[aá]|e\s*a[ií]|tudo\s+bem)[!?.\s🙂😊👋]*$/i;
+const CONTINUATION_ENDING = /\b(?:e|tamb[eé]m|ah|pera|ali[aá]s|porque|que|sobre|com|pra|para)$/i;
 
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -20,10 +22,16 @@ function normalized(text: string): string {
 
 export function adaptiveBatchDelaySeconds(text: string): number {
   const message = normalized(text);
-  if (!message) return 2;
-  if (message.length > 3 && /[?!]$/.test(message)) return 2;
-  if (message.length <= 24 || !/[.]$/.test(message) || /\b(?:e|tamb[eé]m|ah|pera|ali[aá]s)$/i.test(message)) return 3;
-  return 2;
+  if (!message) return 4;
+  // A greeting can be acknowledged quickly. If a substantive message follows,
+  // its newer revision invalidates this draft before it is sent.
+  if (SOCIAL_GREETING.test(message)) return 2;
+  // Short WhatsApp fragments are the strongest signal that the customer is
+  // composing a burst across several bubbles. Every new inbound resets this
+  // window through conversations.next_process_at.
+  if (message.length <= 80 && (!/[.?!]$/.test(message) || CONTINUATION_ENDING.test(message))) return 9;
+  if (message.length > 3 && /[?!]$/.test(message)) return 5;
+  return 6;
 }
 
 export function planConversationTurn(messages: ConversationMessage[]): TurnPlan {

@@ -39,6 +39,7 @@ export async function processConversationTurn(input: {
   enrichCustomer?: EnrichCustomer;
   notifyHandoff?: (input: { conversationId: string; firstName?: string; reason: string; summary: string;
     idempotencyKey: string; accountId: string }) => Promise<void>;
+  preSendGraceMs?: number;
 }): Promise<TurnProcessingResult> {
   const token = randomUUID();
   const acquisition = await input.repository.acquireTurn({ conversationId: input.conversationId,
@@ -110,25 +111,31 @@ export async function processConversationTurn(input: {
         answeredTopics: [plan.socialKind], needsClarification: false, handoffRecommended: false }
       : await input.generateReply({ message: plan.consolidatedMessage, context,
         repairRequested: plan.repairRequested });
-    // A single outbound operation keeps the reply atomic if another customer message arrives mid-send.
-    const text = responsePlan.messages.join("\n\n").trim();
-    if (!text) throw new Error("Empty response plan");
-    const idempotencyKey = `zernio-turn-${turn.conversationId}-${turn.revision}`;
-    const reservation = await input.repository.reserveOutbound({ conversationId: turn.conversationId,
-      revision: turn.revision, token, bubbleIndex: 0, content: text, idempotencyKey });
-    if (reservation === "stale") {
-      await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
-      return "stale";
+    const messages = responsePlan.messages.map((message) => message.trim()).filter(Boolean).slice(0, 2);
+    if (!messages.length) throw new Error("Empty response plan");
+    if ((input.preSendGraceMs ?? 0) > 0) {
+      await new Promise((resolve) => setTimeout(resolve, input.preSendGraceMs));
     }
-    if (reservation === "reserved") {
-      try {
-        await input.provider.sendText({ accountId: turn.accountId, conversationId: turn.providerConversationId,
-          idempotencyKey, text });
-        await input.repository.markOutboundSent({ idempotencyKey });
-      } catch (error) {
-        await input.repository.markOutboundFailed({ idempotencyKey });
-        throw error;
+    for (const [bubbleIndex, text] of messages.entries()) {
+      const idempotencyKey = `zernio-turn-${turn.conversationId}-${turn.revision}-${bubbleIndex}`;
+      const reservation = await input.repository.reserveOutbound({ conversationId: turn.conversationId,
+        revision: turn.revision, token, bubbleIndex, content: text, idempotencyKey });
+      if (reservation === "stale") {
+        await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
+        return "stale";
       }
+      if (reservation === "reserved") {
+        try {
+          await input.provider.sendText({ accountId: turn.accountId, conversationId: turn.providerConversationId,
+            idempotencyKey, text });
+          await input.repository.markOutboundSent({ idempotencyKey });
+        } catch (error) {
+          await input.repository.markOutboundFailed({ idempotencyKey });
+          throw error;
+        }
+      }
+      // A newer inbound revision makes the next reservation stale. The next
+      // turn sees the bubble already sent and answers only what remains.
     }
     const completed = await input.repository.completeTurn({ conversationId: turn.conversationId,
       revision: turn.revision, token, state: "replied",

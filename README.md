@@ -16,6 +16,7 @@ Crie um `.env.local` a partir do `.env.example` e preencha localmente:
 - `AI_GATEWAY_API_KEY`: chave do Vercel AI Gateway. Na Vercel, reutilize a Shared Environment Variable existente; não crie outra chave.
 - `DATABASE_URL`: conexão server-only criada automaticamente pela integração Neon. Não exponha no cliente.
 - `NEXTFIT_API_KEY`: chave da API pública da Nextfit. É usada somente no servidor pelo cabeçalho `X-Api-Key`.
+- `NEXTFIT_BOOKING_URL`: opcional; URL HTTPS do site oficial de agendamentos da Nextfit. Quando presente, pedidos de agendamento são conduzidos para a disponibilidade e confirmação oficiais, sem o agente inventar vagas.
 - `ZERNIO_API_KEY`: chave de API da Zernio com permissão de escrita no Inbox.
 - `ZERNIO_WEBHOOK_SECRET`: segredo forte definido por você e repetido na configuração do webhook da Zernio.
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: chave publicável do Clerk, sincronizada automaticamente pela integração Clerk da Vercel.
@@ -47,7 +48,7 @@ Use Node.js 22 ou superior. Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon p
 5. Use o teste de webhook da Zernio para confirmar HTTP 200.
 6. Envie uma mensagem de texto do telefone ativado para o número compartilhado da sandbox. Dentro da janela de atendimento de 24 horas, a mensagem receberá uma resposta gerada pelo modelo através do AI Gateway.
 
-As mensagens recebidas em sequência são agrupadas por alguns segundos e processadas como um único turno. O Neon controla revisões, lease e idempotência; a Vercel Queue executa o turno com retry. Uma resposta calculada para uma revisão antiga é descartada antes do envio, e a revisão nova considera todos os pedidos acumulados. Em **Vercel → Project → Logs**, filtre por `/api/webhooks/zernio` para ingestão e `/api/queues/whatsapp-turn` para processamento. Os logs não incluem texto, telefone, payload ou credenciais.
+As mensagens recebidas em sequência usam uma janela adaptativa: saudações podem ser acolhidas rapidamente, enquanto frases curtas ou incompletas aguardam mais tempo para reunir uma rajada. Cada mensagem nova reinicia essa janela. O Neon controla revisões, lease e idempotência; a Vercel Queue executa o turno com retry. Uma resposta calculada para uma revisão antiga é descartada antes do envio, inclusive durante a margem final anterior ao envio, e a revisão nova considera todos os pedidos acumulados. Em **Vercel → Project → Logs**, filtre por `/api/webhooks/zernio` para ingestão e `/api/queues/whatsapp-turn` para processamento. Os logs não incluem texto, telefone, payload ou credenciais.
 
 ## Contexto Nextfit
 
@@ -62,6 +63,8 @@ A integração usa exclusivamente os endpoints `GET` oficiais:
 A API não oferece filtro por telefone, portanto clientes e leads são paginados e comparados localmente por número brasileiro normalizado e exato. Resultados ausentes ou ambíguos permanecem `unknown`. Um registro de lead vira `lead`; um cliente com contrato vigente vira `customer`; cliente inativo ou apenas com contratos históricos vira `former_customer`. A API pública atual não sustenta uma classificação distinta de `prospect`, por isso ela não é inventada.
 
 O snapshot geral é reutilizado por 6 horas. Perguntas sobre agenda, contrato ou financeiro podem atualizá-lo depois de 15 minutos. Dados voláteis com mais de 24 horas não são enviados ao modelo. A aplicação não grava nada na Nextfit e continua respondendo se o serviço estiver indisponível.
+
+A API pública contratada da Nextfit é somente leitura. O endpoint `/Agenda` é usado para compromissos do cliente, mas a aplicação não deriva vagas livres sem capacidade e regras oficiais. Quando `NEXTFIT_BOOKING_URL` estiver configurada, o agente direciona a pessoa ao site oficial para consultar a disponibilidade atual e concluir a reserva. Sem esse link, oferece handoff interno; nunca declara um horário reservado nem manda o cliente para o mesmo número em que já está falando.
 
 Os nomes ativos de contratos/produtos são copiados para um cache derivado no Neon, mantendo a Nextfit como fonte oficial. A sincronização ocorre diariamente pela Vercel Cron e pode ser antecipada pelo botão **Atualizar catálogo** na caixa de atendimento. Como a API pública atual da Nextfit não documenta webhook de alteração de catálogo, nenhum payload de webhook foi inventado. O cache confirma somente nome e existência; preço, duração e benefício continuam vindo de dados explicitamente confirmados.
 
