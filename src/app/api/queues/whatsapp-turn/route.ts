@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { generateWhatsAppReplyPlan } from "@/lib/ai/generate-whatsapp-reply";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
 import { processConversationTurn } from "@/lib/conversations/process-conversation-turn";
+import { isRetryableTurnStateError, queueTurnRetryDirective,
+  requireSettledQueueTurn } from "@/lib/conversations/queue-turn-retry";
 import type { WhatsAppTurnQueueMessage } from "@/lib/conversations/turn-queue";
 import { HANDOFF_ACKNOWLEDGEMENT } from "@/lib/handoff/detection";
 import { buildHandoffSummary } from "@/lib/handoff/summary";
@@ -70,15 +72,20 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
   const notifyHandoff = notification(provider);
   try {
     const nextfitApiKey = process.env.NEXTFIT_API_KEY;
-    const result = await processConversationTurn({ conversationId: message.conversationId,
+    const result = requireSettledQueueTurn(await processConversationTurn({ conversationId: message.conversationId,
       observedRevision: message.observedRevision, repository, provider,
       generateReply: generateWhatsAppReplyPlan,
       ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey),
         store: repository }) } : {}),
-      notifyHandoff });
+      notifyHandoff }));
     logProcessingEvent("info", { event: "WhatsApp turn processing completed",
       eventId: metadata.messageId, messageId: metadata.messageId, result });
   } catch (error) {
+    if (isRetryableTurnStateError(error)) {
+      logProcessingEvent("info", { event: "WhatsApp turn processing deferred",
+        eventId: metadata.messageId, messageId: metadata.messageId, result: error.state });
+      throw error;
+    }
     logProcessingEvent("error", { event: "WhatsApp turn processing failed",
       eventId: metadata.messageId, messageId: metadata.messageId,
       error: error instanceof Error ? error.name : "UnknownError" });
@@ -90,7 +97,5 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
   }
 }, {
   visibilityTimeoutSeconds: 90,
-  retry: (_error, metadata) => metadata.deliveryCount >= 7
-    ? { acknowledge: true }
-    : { afterSeconds: Math.min(60, 2 ** metadata.deliveryCount * 3) },
+  retry: (error, metadata) => queueTurnRetryDirective(error, metadata.deliveryCount),
 });
