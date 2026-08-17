@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { detectHandoffRequest } from "./detection.ts";
+import { detectHandoffConsent, detectHandoffRequest } from "./detection.ts";
 import { buildHandoffSummary } from "./summary.ts";
 import { handleIncomingMessage } from "../conversations/handle-incoming-message.ts";
 import type { ConversationMessage, ConversationStatus } from "../conversations/types.ts";
@@ -11,12 +11,74 @@ test("detects an explicit request for a human", () => {
   });
 });
 
+test("accepts a short confirmation only after a clear handoff offer", () => {
+  const offer = "Posso encaminhar seu pedido para nossa equipe verificar e continuar por aqui?";
+  for (const answer of ["Sim", "Pode sim", "Claro", "Por favor", "Tá bom"]) {
+    assert.equal(detectHandoffConsent(answer, offer)?.source, "customer", answer);
+  }
+  assert.equal(detectHandoffConsent("Sim", "A massagem custa R$ 270."), undefined);
+  assert.equal(detectHandoffConsent("Não", offer), undefined);
+});
+
+test("does not hand off a negated human request", () => {
+  for (const message of [
+    "Não quero atendimento humano, quero resolver por aqui",
+    "Não precisa chamar a Bia",
+    "Prefiro não falar com atendente",
+    "Não preciso de uma pessoa",
+    "Não gostaria de atendimento humano",
+  ]) {
+    assert.equal(detectHandoffRequest(message), undefined, message);
+  }
+  assert.equal(detectHandoffRequest("Não quero falar com robô, quero uma pessoa")?.source, "customer");
+});
+
 test("does not escalate a normal service question", () => {
   assert.equal(detectHandoffRequest("Quanto custa Pilates duas vezes por semana?"), undefined);
 });
 
+test("ordinary shoulder discomfort remains a useful commercial conversation", () => {
+  assert.equal(
+    detectHandoffRequest("Quero massagem relaxante porque estou com dor no ombro"),
+    undefined,
+  );
+  assert.equal(
+    detectHandoffRequest("Posso fazer massagem para dor no ombro?"),
+    undefined,
+  );
+});
+
+test("a red-flag symptom escalates for clinical safety", () => {
+  assert.equal(
+    detectHandoffRequest("Estou com dor no peito e falta de ar")?.source,
+    "safety_rule",
+  );
+});
+
 test("escalates a sensitive clinical decision", () => {
   assert.equal(detectHandoffRequest("Estou grávida, posso fazer crioterapia?")?.source, "safety_rule");
+  for (const message of [
+    "Posso fazer massagem grávida?",
+    "Posso fazer massagem depois de cirurgia?",
+    "Posso fazer crioterapia com pressão alta?",
+    "Quero massagem e estou gestante",
+  ]) {
+    assert.equal(detectHandoffRequest(message)?.source, "safety_rule", message);
+  }
+});
+
+test("only escalates disagreement when it is actually financial", () => {
+  assert.equal(
+    detectHandoffRequest("Discordo: Thai é especial, não tradicional"),
+    undefined,
+  );
+  assert.equal(
+    detectHandoffRequest("Quero contestar essa classificação da massagem"),
+    undefined,
+  );
+  assert.equal(detectHandoffRequest("Essa cobrança é indevida")?.source, "safety_rule");
+  assert.equal(detectHandoffRequest("Quero reembolso")?.source, "safety_rule");
+  assert.equal(detectHandoffRequest("Discordo do valor cobrado")?.source, "safety_rule");
 });
 
 test("summary is concise and identifies speakers", () => {

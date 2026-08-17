@@ -1,12 +1,12 @@
 import type { ConversationIdentity, CustomerProfileStore } from "../conversations/types.ts";
+import { isPersonalAccountFollowUp, isPersonalAccountQuery } from "../customer-context/personal-intent.ts";
 import { buildSnapshot, lookupPersonByPhone } from "./normalization.ts";
 import type { NextfitApi } from "./types.ts";
 
 const VOLATILE_TERMS = /\b(venc|pag|finance|plano|contrato|agenda|visita|frequ[eê]ncia)\w*/i;
-const PERSONAL_CONTEXT_TERMS = /\b(?:meu|minha|meus|minhas|sou\s+cliente|cadastro|contrato|venc\w*|paguei|pagamento|cobran[cç]a|mensalidade|pr[oó]xima\s+(?:aula|visita|consulta)|[uú]ltim[oa]\s+(?:servi[cç]o|visita|pagamento)|frequ[eê]ncia|presen[cç]a)\b/i;
-
-export function needsNextfitEnrichment(message: string): boolean {
-  return PERSONAL_CONTEXT_TERMS.test(message);
+export function needsNextfitEnrichment(message: string, previousUserMessage?: string): boolean {
+  return isPersonalAccountQuery(message)
+    || isPersonalAccountFollowUp(message, previousUserMessage);
 }
 
 export function shouldRefresh(syncedAt: string | undefined, message: string, now = new Date()): boolean {

@@ -50,17 +50,41 @@ async function escalatePermanentFailure(message: WhatsAppTurnQueueMessage, repos
   const reason = "O atendimento automático encontrou uma falha persistente.";
   const history = await repository.getRecentMessages(turn.conversationId, 12);
   const summary = buildHandoffSummary(history, reason);
-  await repository.requestHandoff({ conversationId: turn.conversationId,
-    providerAccountId: turn.accountId, providerConversationId: turn.providerConversationId,
-    reason, source: "system_failure", summary });
-  await provider.sendText({ accountId: turn.accountId, conversationId: turn.providerConversationId,
-    idempotencyKey: `zernio-failure-handoff-${turn.conversationId}-${turn.revision}`,
-    text: HANDOFF_ACKNOWLEDGEMENT });
-  await repository.recordOutbound({ conversationId: turn.conversationId, content: HANDOFF_ACKNOWLEDGEMENT });
-  const notify = notification(provider);
-  if (notify) await notify({ conversationId: turn.conversationId, firstName: turn.identity.firstName,
-    reason, summary, idempotencyKey: `handoff-failure-notification-${turn.conversationId}-${turn.revision}`,
-    accountId: turn.accountId });
+  const idempotencyKey = `zernio-failure-handoff-${turn.conversationId}-${turn.revision}`;
+  try {
+    const reservation = await repository.reserveOutbound({ conversationId: turn.conversationId,
+      revision: turn.revision, token, bubbleIndex: 0, content: HANDOFF_ACKNOWLEDGEMENT, idempotencyKey });
+    if (reservation === "stale") {
+      await repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
+      return;
+    }
+    if (reservation === "reserved") {
+      try {
+        await provider.sendText({ accountId: turn.accountId, conversationId: turn.providerConversationId,
+          idempotencyKey, text: HANDOFF_ACKNOWLEDGEMENT });
+        await repository.markOutboundSent({ idempotencyKey });
+      } catch (error) {
+        await repository.markOutboundFailed({ idempotencyKey });
+        throw error;
+      }
+    }
+    await repository.requestHandoff({ conversationId: turn.conversationId,
+      providerAccountId: turn.accountId, providerConversationId: turn.providerConversationId,
+      reason, source: "system_failure", summary });
+  } catch (error) {
+    await repository.releaseTurn({ conversationId: turn.conversationId, token, state: "failed" });
+    throw error;
+  }
+  try {
+    const notify = notification(provider);
+    await notify({ conversationId: turn.conversationId, firstName: turn.identity.firstName,
+      reason, summary, idempotencyKey: `handoff-failure-notification-${turn.conversationId}-${turn.revision}`,
+      accountId: turn.accountId });
+  } catch (error) {
+    console.warn("Permanent failure handoff notification failed", {
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
 }
 
 async function recordTurnFailure(error: unknown, message: WhatsAppTurnQueueMessage, deliveryCount: number) {

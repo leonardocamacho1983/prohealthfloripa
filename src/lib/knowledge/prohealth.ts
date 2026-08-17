@@ -114,7 +114,7 @@ export const proHealthKnowledge = {
   pendingInformation: [],
   clinicalSafety: {
     guidance:
-      "Não diagnosticar, prescrever ou afirmar aptidão clínica. Em caso de condição médica, gestação, cirurgia recente, lesão relevante, problema cardiovascular, trombose, alteração importante de pressão ou dúvida sobre crioterapia, massagem ou exercício, orientar confirmação prévia com a equipe ou profissional responsável.",
+      "Não diagnosticar, prescrever, prometer alívio nem afirmar aptidão clínica. Dor muscular comum, tensão ou desconforto sem sinal de alarme não impedem a resposta comercial: explique a técnica e diga que o profissional conversa e avalia no início para ajustar ou indicar a opção mais adequada. Encaminhe para avaliação humana quando houver trauma recente, dor súbita ou intensa, perda de força ou sensibilidade, falta de ar, dor no peito, febre, suspeita de trombose, gestação, cirurgia recente, condição médica relevante ou quando a pessoa pedir decisão clínica individual.",
   },
   purchase: {
     plansUrl:

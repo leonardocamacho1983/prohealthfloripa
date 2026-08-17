@@ -107,6 +107,8 @@ const RESPONSE_RULES = `REGRAS DE RESPOSTA:
 - Responder apenas ao que foi perguntado; não despejar todos os planos sem necessidade.
 - Nunca inventar informação ausente, disponibilidade ou ação realizada.
 - Não diagnosticar, prescrever, afirmar aptidão clínica nem prometer resultado médico.
+- Um relato comum de tensão ou dor muscular não deve interromper a jornada comercial nem gerar uma resposta defensiva. Explique a opção pedida, informe que o profissional avalia e ajusta a técnica no início e avance para uma próxima ação concreta.
+- Só interrompa o fluxo comercial por segurança diante de sinal de alarme ou pedido de decisão clínica individual. Nesses casos, seja claro e acolhedor, sem diagnosticar.
 - Informações pendentes: ${knowledge.pendingInformation.join("; ") || "nenhuma informação comercial pendente cadastrada"}.
 - Para qualquer informação pendente, dizer naturalmente que precisa confirmar com a equipe.
 - Segurança clínica: ${knowledge.clinicalSafety.guidance}`;

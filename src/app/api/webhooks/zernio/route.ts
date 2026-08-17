@@ -52,10 +52,8 @@ export async function POST(request: Request) {
   }
 
   const { message } = parsed;
-  console.info("Zernio text message received", {
-    eventId: message.eventId,
-    messageId: message.messageId,
-  });
+  logProcessingEvent("info", { event: "Zernio text message received",
+    eventId: message.eventId, messageId: message.messageId });
 
   const delaySeconds = adaptiveBatchDelaySeconds(message.text);
   try {

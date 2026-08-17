@@ -68,6 +68,10 @@ test("16b. Nextfit só entra no caminho crítico quando a pergunta é pessoal", 
   assert.equal(needsNextfitEnrichment("Quanto custa massagem Lomi-Lomi?"), false);
   assert.equal(needsNextfitEnrichment("Quando vence meu plano?"), true);
   assert.equal(needsNextfitEnrichment("Qual foi meu último pagamento?"), true);
+  assert.equal(needsNextfitEnrichment("Minha amiga quer saber o endereço"), false);
+  assert.equal(needsNextfitEnrichment("Meu marido quer saber o preço"), false);
+  assert.equal(needsNextfitEnrichment("E quando vence?", "Quero saber do meu plano"), true);
+  assert.equal(needsNextfitEnrichment("E quando vence?", "Qual é o preço do Pilates?"), false);
 });
 test("17. snapshot sem vínculo não impede nova consulta de identidade", async () => {
   let customerQueries = 0;
@@ -157,4 +161,88 @@ test("22. contexto usa inteligência resumida sem expor histórico bruto", () =>
   const output = buildModelCustomerContext(context, now);
   assert.match(output, /activeServices|renewal_due/);
   assert.doesNotMatch(output, /dateOfBirth|lastPayment|overdueDays|human_followup|attendanceMetrics|consumedServicesSummary/);
+});
+
+test("23. todas as mensagens do turno atual participam da minimização por intenção", () => {
+  const context: CustomerContext = { identity: { relationshipStatus: "customer", firstName: "Ana" },
+    conversation: { recentMessages: [
+      { id: "payment", conversationId: "v", direction: "inbound", role: "user",
+        content: "Quanto foi meu último pagamento?", createdAt: now },
+      { id: "address", conversationId: "v", direction: "inbound", role: "user",
+        content: "E qual é o endereço?", createdAt: now },
+    ] }, customer: { syncedAt: now.toISOString(), relationshipMetrics: {
+      lastPayment: { amount: 420, paidAt: "2026-08-02T12:00:00Z" },
+    } } };
+
+  assert.match(buildModelCustomerContext(context, now, ["payment", "address"]), /420/);
+  assert.doesNotMatch(buildModelCustomerContext(context, now, ["address"]), /420/);
+});
+
+test("24. pergunta pública não envia inteligência derivada da Nextfit ao modelo", () => {
+  const context: CustomerContext = { identity: { relationshipStatus: "customer", firstName: "Ana" },
+    conversation: { recentMessages: [{ id: "public", conversationId: "v", direction: "inbound", role: "user",
+      content: "Qual é o endereço?", createdAt: now }] }, customer: { syncedAt: now.toISOString(),
+      nextVisitAt: "2026-08-18T12:00:00Z", activeContracts: [{ name: "Pilates" }],
+      financialStatus: "overdue", relationshipMetrics: { customerIntelligence: {
+        relationshipState: { value: "active" }, metrics: { daysAsCustomer: 365, activeServices: ["Pilates"] },
+        recentActivitySummary: "Presença ontem", nextBestActions: [{ type: "retention", reason: "queda",
+          confidence: "high", evidence: [{ metric: "inactivityDays", value: 1 }] }],
+      } } } };
+
+  const output = buildModelCustomerContext(context, now, ["public"]);
+  assert.doesNotMatch(output, /relationshipState|relationshipDurationDays|nextVisitAt|activeContracts|activeServices|recentActivitySummary|nextBestActions|overdue/);
+  assert.match(output, /"firstName":"Ana"/);
+});
+
+test("25. termos de conta sem marcador pessoal continuam sendo perguntas públicas", () => {
+  const customer = { syncedAt: now.toISOString(), nextVisitAt: "2026-08-18T12:00:00Z",
+    activeContracts: [{ name: "PRIVATE PLAN" }], financialStatus: "overdue" as const,
+    relationshipMetrics: { customerIntelligence: {
+      relationshipState: { value: "active" }, metrics: { daysAsCustomer: 365, activeServices: ["PRIVATE"] },
+      recentActivitySummary: "private activity", nextBestActions: [],
+    }, lastPayment: { amount: 420, paidAt: "2026-08-02T12:00:00Z" } } };
+  for (const [index, content] of [
+    "Como funciona o contrato de Pilates?",
+    "Qual o vencimento dos planos?",
+    "Qual a mensalidade do Pilates?",
+    "Qual frequência recomendada para Pilates?",
+  ].entries()) {
+    const messageId = `public-${index}`;
+    const context: CustomerContext = { identity: { relationshipStatus: "customer", firstName: "Ana" },
+      conversation: { recentMessages: [{ id: messageId, conversationId: "v", direction: "inbound",
+        role: "user", content, createdAt: now }] }, customer };
+    const output = buildModelCustomerContext(context, now, [messageId]);
+    assert.doesNotMatch(output, /PRIVATE PLAN|overdue|relationshipState|activeServices|private activity|420/, content);
+  }
+});
+
+test("26. dados financeiros detalhados exigem intenção em primeira pessoa", () => {
+  const context: CustomerContext = { identity: { relationshipStatus: "customer", firstName: "Ana" },
+    conversation: { recentMessages: [] }, customer: { syncedAt: now.toISOString(), relationshipMetrics: {
+      lastPayment: { amount: 420, paidAt: "2026-08-02T12:00:00Z" },
+    } } };
+  context.conversation.recentMessages = [{ id: "public", conversationId: "v", direction: "inbound",
+    role: "user", content: "Qual o valor do último pagamento?", createdAt: now }];
+  assert.doesNotMatch(buildModelCustomerContext(context, now, ["public"]), /420/);
+  context.conversation.recentMessages = [{ id: "personal", conversationId: "v", direction: "inbound",
+    role: "user", content: "Qual o valor do meu último pagamento?", createdAt: now }];
+  assert.match(buildModelCustomerContext(context, now, ["personal"]), /420/);
+});
+
+test("27. follow-up curto preserva o contexto pessoal somente no mesmo episódio", () => {
+  const customer = { syncedAt: now.toISOString(), activeContracts: [{ name: "Pilates 2x" }],
+    relationshipMetrics: { lastPayment: { amount: 420, paidAt: "2026-08-02T12:00:00Z" } } };
+  const context: CustomerContext = { identity: { relationshipStatus: "customer", firstName: "Ana" },
+    conversation: { recentMessages: [
+      { id: "personal", conversationId: "v", direction: "inbound", role: "user",
+        content: "Quero saber do meu plano", createdAt: new Date(now.getTime() - 60_000) },
+      { id: "reply", conversationId: "v", direction: "outbound", role: "assistant",
+        content: "Seu plano é Pilates 2x.", createdAt: new Date(now.getTime() - 30_000) },
+      { id: "follow-up", conversationId: "v", direction: "inbound", role: "user",
+        content: "E quando vence?", createdAt: now },
+    ] }, customer };
+
+  assert.match(buildModelCustomerContext(context, now, ["follow-up"]), /Pilates 2x/);
+  context.conversation.recentMessages = [context.conversation.recentMessages.at(-1)!];
+  assert.doesNotMatch(buildModelCustomerContext(context, now, ["follow-up"]), /Pilates 2x/);
 });

@@ -1,9 +1,12 @@
-export type SocialMessageKind = "gratitude" | "acknowledgement" | "farewell";
+import { analyzeMassageRequest } from "../knowledge/massage-catalog-semantics.ts";
+
+export type SocialMessageKind = "greeting" | "gratitude" | "acknowledgement" | "farewell";
 
 const BUSINESS_TERMS = /\b(?:plano|contrato|valor|pre[cç]o|pag\w*|cobran[cç]a|venc\w*|in[ií]cio|servi[cç]o|pilates|massagem|fisioterapia|recovery|agenda\w*|hor[aá]rio|aula|consulta|cancel\w*)\b/i;
 const ACKNOWLEDGEMENTS = new Set(["ok", "okay", "blz", "beleza", "certo", "entendi", "combinado", "perfeito", "show"]);
 const FAREWELLS = new Set(["tchau", "xau", "ate mais", "ate logo"]);
 const GRATITUDE_WORDS = ["obrigado", "obrigada", "agradeco", "valeu"];
+const COMMERCIAL_REQUEST = /\b(?:quero|queria|preciso|gostaria|procuro|busco)\b/i;
 
 function normalize(text: string): string {
   return text
@@ -13,6 +16,13 @@ function normalize(text: string): string {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function isGreetingMessage(text: string): boolean {
+  const normalized = normalize(text);
+  return /^(?:(?:oi+|ola|alo|e ai)\s+)?(?:bom dia|boa tarde|boa noite)(?:\s+tudo bem)?$/.test(normalized)
+    || /^(?:oi+|ola|alo|e ai)(?:\s+tudo bem)?$/.test(normalized)
+    || /^(?:tudo bem|como vai)$/.test(normalized);
 }
 
 function editDistance(left: string, right: string): number {
@@ -38,7 +48,13 @@ function resemblesGratitude(word: string): boolean {
 }
 
 export function classifySocialMessage(text: string): SocialMessageKind | undefined {
-  if (BUSINESS_TERMS.test(text) || text.includes("?")) return undefined;
+  // Questions such as "tudo bem?" are still social. This exact-match check
+  // must run before the generic question guard so a greeting-only burst never
+  // wakes the business agent with stale conversational context.
+  if (isGreetingMessage(text)) return "greeting";
+  const confirmedMassageRequest = COMMERCIAL_REQUEST.test(text)
+    && analyzeMassageRequest(text).mentions.length > 0;
+  if (BUSINESS_TERMS.test(text) || confirmedMassageRequest || text.includes("?")) return undefined;
   const normalized = normalize(text);
   if (!normalized) return undefined;
   const words = normalized.split(" ");
@@ -51,6 +67,7 @@ export function classifySocialMessage(text: string): SocialMessageKind | undefin
 
 export function buildSocialReply(kind: SocialMessageKind, firstName?: string): string {
   const name = firstName ? `, ${firstName}` : "";
+  if (kind === "greeting") return `Oi${name}! Tudo bem? Como posso ajudar?`;
   if (kind === "gratitude") return `De nada${name} 🙂 Se precisar, é só me chamar.`;
   if (kind === "farewell") return `Até mais${name}! Se precisar, é só me chamar.`;
   return `Tudo certo${name} 🙂`;

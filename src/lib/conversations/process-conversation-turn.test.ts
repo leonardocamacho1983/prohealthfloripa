@@ -74,7 +74,14 @@ class TurnProvider implements WhatsAppProvider {
   sent: string[] = [];
   typing = 0;
   onSend?: (text: string) => void;
-  async sendText(input: { text: string }) { this.sent.push(input.text); this.onSend?.(input.text); }
+  failNextSend = false;
+  async sendText(input: { text: string }) {
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new Error("temporary provider failure");
+    }
+    this.sent.push(input.text); this.onSend?.(input.text);
+  }
   async sendTypingIndicator() { this.typing += 1; }
 }
 
@@ -89,12 +96,55 @@ function reply(text = "Resposta consolidada") {
 test("five rapid messages use one enrichment, one generation and one outbound send", async () => {
   const repository = new TurnRepository(["Quero saber do meu plano", "e da Lomi-Lomi", "Quanto custa", "Ah", "oi"]);
   const provider = new TurnProvider(); let enriched = 0; let generated = 0; let consolidated = "";
+  let currentTurnMessageIds: readonly string[] = [];
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 5,
     repository, provider, enrichCustomer: async ({ identity }) => { enriched += 1; return identity; },
-    generateReply: async (input) => { generated += 1; consolidated = input.message; return reply()(input); } });
+    generateReply: async (input) => { generated += 1; consolidated = input.message;
+      currentTurnMessageIds = input.currentTurnMessageIds ?? []; return reply()(input); } });
   assert.equal(result, "replied");
   assert.equal(enriched, 1); assert.equal(generated, 1); assert.equal(provider.sent.length, 1);
+  assert.equal(currentTurnMessageIds.length, 5);
   assert.match(consolidated, /Lomi-Lomi/); assert.match(consolidated, /Quanto custa/);
+});
+
+test("a greeting-only burst never invokes AI or revives an old topic", async () => {
+  const repository = new TurnRepository(["Oi bom dia", "Tudo bem?"]);
+  repository.messages.unshift({ id: "old-topic", conversationId: "conversation",
+    direction: "inbound", role: "user", content: "Dor antiga na cervical",
+    createdAt: new Date(-11 * 60 * 60 * 1000) });
+  const provider = new TurnProvider();
+  let generated = false;
+
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 2,
+    repository, provider, generateReply: async () => {
+      generated = true;
+      return reply()(undefined as never);
+    } });
+
+  assert.equal(result, "replied");
+  assert.equal(generated, false);
+  assert.deepEqual(provider.sent, ["Oi! Tudo bem? Como posso ajudar?"]);
+});
+
+test("a greeting after inactivity starts an episode that excludes the old symptom", async () => {
+  const repository = new TurnRepository(["Oi bom dia", "Quero massagem de liberação", "Dor no ombro"]);
+  repository.messages.unshift(
+    { id: "old-user", conversationId: "conversation", direction: "inbound", role: "user",
+      content: "Dor antiga na cervical", createdAt: new Date(-11 * 60 * 60 * 1000) },
+    { id: "old-assistant", conversationId: "conversation", direction: "outbound", role: "assistant",
+      content: "Vou considerar sua cervical.", createdAt: new Date(-11 * 60 * 60 * 1000 + 1_000) },
+  );
+  const provider = new TurnProvider();
+  let visibleHistory = "";
+
+  await processConversationTurn({ conversationId: "conversation", observedRevision: 3,
+    repository, provider, generateReply: async ({ context }) => {
+      visibleHistory = context.conversation.recentMessages.map((message) => message.content).join(" | ");
+      return reply("Resposta do episódio atual")();
+    } });
+
+  assert.doesNotMatch(visibleHistory, /cervical/i);
+  assert.match(visibleHistory, /massagem de liberação/i);
 });
 
 test("different topics may be delivered as two short WhatsApp bubbles", async () => {
@@ -202,4 +252,145 @@ test("a split human request opens only one handoff", async () => {
     repository, provider, generateReply: reply() });
   assert.equal(result, "handoff_requested"); assert.equal(repository.handoffRequested, true);
   assert.equal(provider.sent.length, 1);
+});
+
+test("a short acceptance after an assistant offer opens handoff without invoking AI", async () => {
+  const repository = new TurnRepository(["Sim"]);
+  repository.messages.unshift({ id: "offer", conversationId: "conversation",
+    direction: "outbound", role: "assistant",
+    content: "Posso encaminhar seu pedido para nossa equipe verificar e continuar por aqui?",
+    createdAt: new Date(-1_000) });
+  const provider = new TurnProvider();
+  let generated = false;
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: async () => { generated = true; return reply()(); } });
+  assert.equal(result, "handoff_requested");
+  assert.equal(repository.handoffRequested, true);
+  assert.equal(generated, false);
+  assert.match(provider.sent[0] ?? "", /Bia continuar[aá]/i);
+});
+
+test("a short acceptance cannot revive an old or non-adjacent handoff offer", async () => {
+  const repository = new TurnRepository(["Sim"]);
+  repository.messages.unshift(
+    { id: "old-offer", conversationId: "conversation", direction: "outbound", role: "assistant",
+      content: "Posso encaminhar para nossa equipe?", createdAt: new Date(-31 * 60_000) },
+    { id: "intervening-user", conversationId: "conversation", direction: "inbound", role: "user",
+      content: "Qual é o endereço?", createdAt: new Date(-30_000) },
+  );
+  const provider = new TurnProvider();
+  let generated = false;
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: async () => { generated = true; return reply("Certo.")(); } });
+  assert.equal(result, "replied");
+  assert.equal(repository.handoffRequested, false);
+  assert.equal(generated, true);
+});
+
+test("failed handoff acknowledgement keeps the conversation active and retries idempotently", async () => {
+  const repository = new TurnRepository(["Quero falar com uma pessoa"]);
+  const provider = new TurnProvider();
+  provider.failNextSend = true;
+
+  await assert.rejects(processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: reply() }), /temporary provider failure/);
+  assert.equal(repository.status, "active");
+  assert.equal(repository.handoffRequested, false);
+  assert.equal(repository.releasedState, "failed");
+
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: reply() });
+  assert.equal(result, "handoff_requested");
+  assert.equal(repository.handoffRequested, true);
+  assert.equal(provider.sent.length, 1);
+});
+
+test("handoff notification failure cannot block acknowledgement or human ownership", async () => {
+  const repository = new TurnRepository(["Quero falar com uma pessoa"]);
+  const provider = new TurnProvider();
+  let notificationAttempts = 0;
+  const notifyHandoff = async () => { notificationAttempts += 1; throw new Error("notification unavailable"); };
+
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: reply(), notifyHandoff });
+  assert.equal(result, "handoff_requested");
+  assert.equal(repository.status, "human_requested");
+  assert.equal(notificationAttempts, 1);
+  assert.equal(provider.sent.length, 1);
+});
+
+test("a short personal follow-up reuses only a recent explicit account request", async () => {
+  const repository = new TurnRepository(["E quando vence?"]);
+  repository.messages.unshift({ id: "previous-account", conversationId: "conversation",
+    direction: "inbound", role: "user", content: "Quero saber do meu plano",
+    createdAt: new Date(-60_000) });
+  const provider = new TurnProvider();
+  let enriched = 0;
+  await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, enrichCustomer: async ({ identity }) => { enriched += 1; return identity; },
+    generateReply: reply() });
+  assert.equal(enriched, 1);
+
+  const oldRepository = new TurnRepository(["E quando vence?"]);
+  oldRepository.messages.unshift({ id: "old-account", conversationId: "conversation",
+    direction: "inbound", role: "user", content: "Quero saber do meu plano",
+    createdAt: new Date(-31 * 60_000) });
+  await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository: oldRepository, provider: new TurnProvider(),
+    enrichCustomer: async ({ identity }) => { enriched += 1; return identity; }, generateReply: reply() });
+  assert.equal(enriched, 1);
+});
+
+test("exhausted AI generation sends a visible fallback and opens handoff instead of going silent", async () => {
+  const repository = new TurnRepository(["Quero saber quais massagens vocês têm"]);
+  const provider = new TurnProvider();
+
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: async () => {
+      const error = new Error("provider payload with private customer content");
+      error.name = "WhatsAppReplyGenerationError";
+      throw error;
+    } });
+
+  assert.equal(result, "handoff_requested");
+  assert.equal(repository.handoffRequested, true);
+  assert.equal(provider.sent.length, 1);
+  assert.match(provider.sent[0] ?? "", /sem você precisar repetir/i);
+  assert.equal(repository.releasedState, undefined);
+});
+
+test("an unvalidated model handoff recommendation cannot interrupt an ordinary conversation", async () => {
+  const repository = new TurnRepository(["Quero massagem relaxante para dor no ombro"]);
+  const provider = new TurnProvider();
+
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: async () => ({
+      messages: ["A relaxante custa R$ 270; o profissional avalia e ajusta a técnica no início."],
+      answeredTopics: ["massagem"],
+      needsClarification: false,
+      handoffRecommended: true,
+    }) });
+
+  assert.equal(result, "replied");
+  assert.equal(repository.handoffRequested, false);
+  assert.equal(provider.sent.length, 1);
+});
+
+test("a locally validated partial fallback opens handoff after preserving the known answer", async () => {
+  const repository = new TurnRepository(["Quero massagem e tenho outra dúvida sobre meu contrato"]);
+  const provider = new TurnProvider();
+
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: async () => ({
+      messages: ["A massagem custa R$ 270.",
+        "Também registrei a dúvida do contrato para nossa equipe continuar sem você repetir."],
+      answeredTopics: ["massagem"],
+      needsClarification: false,
+      handoffRecommended: true,
+      handoffValidated: true,
+    }) });
+
+  assert.equal(result, "handoff_requested");
+  assert.equal(repository.handoffRequested, true);
+  assert.equal(provider.sent.length, 2);
 });

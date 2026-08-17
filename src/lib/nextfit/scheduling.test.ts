@@ -6,6 +6,7 @@ import { buildSchedulingInstructions, detectSchedulingIntent } from "./schedulin
 test("recognizes a service plus a date as scheduling intent", () => {
   assert.deepEqual(detectSchedulingIntent("Preciso de massagem relaxante hoje"), {
     requested: true, hasService: true, hasDatePreference: true,
+    hasDayPreference: true, hasPeriodPreference: false,
   });
 });
 
@@ -16,8 +17,12 @@ test("does not confuse opening hours with a booking request", () => {
 
 test("asks only for the missing scheduling detail", () => {
   const instructions = buildSchedulingInstructions("Quero agendar uma massagem", undefined);
-  assert.match(instructions ?? "", /dia ou período/);
-  assert.doesNotMatch(instructions ?? "", /descobrir: serviço e/);
+  assert.match(instructions ?? "", /dia e período/);
+  assert.doesNotMatch(instructions ?? "", /descobrir: serviço/);
+
+  const today = buildSchedulingInstructions("Quero massagem hoje", undefined);
+  assert.match(today ?? "", /descobrir: período \(manhã, tarde ou noite\)/);
+  assert.doesNotMatch(today ?? "", /descobrir: dia/);
 });
 
 test("uses only a valid HTTPS booking URL and never claims a booking", () => {

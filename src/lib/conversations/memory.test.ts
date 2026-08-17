@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildCustomerContext } from "../customer-context/index.ts";
-import { logProcessingEvent } from "../observability/safe-log.ts";
+import { buildCustomerContext, detectOpenIntent } from "../customer-context/index.ts";
+import { fingerprintIdentifier, logProcessingEvent } from "../observability/safe-log.ts";
 import type { WhatsAppProvider } from "../whatsapp/provider.ts";
 import { handleIncomingMessage } from "./handle-incoming-message.ts";
 import type { ConversationIdentity, ConversationMessage, ConversationRepository, CustomerProfile } from "./types.ts";
@@ -109,6 +109,31 @@ test("Pilates follow-up preserves enough context for annual plan", async () => {
   assert.match(provider.sent.at(-1) ?? "", /E anual\?/);
 });
 
+test("the newest customer intent wins over an older subject", () => {
+  const messages: ConversationMessage[] = [
+    { id: "1", conversationId: "conversation", direction: "inbound", role: "user",
+      content: "Quero Pilates", createdAt: new Date("2026-08-16T10:00:00.000Z") },
+    { id: "2", conversationId: "conversation", direction: "outbound", role: "assistant",
+      content: "Temos Pilates.", createdAt: new Date("2026-08-16T10:00:01.000Z") },
+    { id: "3", conversationId: "conversation", direction: "inbound", role: "user",
+      content: "Agora quero massagem", createdAt: new Date("2026-08-17T10:00:00.000Z") },
+  ];
+
+  assert.equal(detectOpenIntent(messages), "massagem");
+});
+
+test("confirmed massage aliases replace an older open intent", () => {
+  const previousPilates: ConversationMessage = { id: "1", conversationId: "conversation",
+    direction: "inbound", role: "user", content: "Quero Pilates",
+    createdAt: new Date("2026-08-16T10:00:00.000Z") };
+  for (const [index, content] of ["Agora quero Lomi-Lomi", "Quero Thai", "Preciso de liberação miofascial"].entries()) {
+    const current: ConversationMessage = { id: `current-${index}`, conversationId: "conversation",
+      direction: "inbound", role: "user", content,
+      createdAt: new Date(`2026-08-17T10:00:0${index}.000Z`) };
+    assert.equal(detectOpenIntent([previousPilates, current]), "massagem", content);
+  }
+});
+
 test("database failure stops before sending a reply", async () => {
   const repository = new MemoryRepository(); const provider = new MemoryProvider();
   repository.recordInbound = async () => { throw new Error("database unavailable"); };
@@ -131,9 +156,21 @@ test("social messages skip enrichment and AI generation", async () => {
 
 test("safe logs omit phone, message content, tokens, and API keys", () => {
   const original = console.info; const calls: unknown[] = [];
+  const eventId = "fecae211-d6fb-4ca5-8528-1a0f1515872a";
+  const messageId = "wamid.HBgMNTU0NzkyMTY2MTAxFQIAEhgUM0JBODkyNEFDOUYxQzFEOTRFMzUA";
+  const phoneNumber = "+5547992166101";
   console.info = (...args: unknown[]) => { calls.push(args); };
-  try { logProcessingEvent("info", { event: "processed", eventId: "event-1", result: "replied" }); }
+  try {
+    logProcessingEvent("info", { event: "processed", eventId, messageId, phoneNumber,
+      contactId: "contact-secret", conversationId: "conversation-secret", result: "replied" });
+  }
   finally { console.info = original; }
   const serialized = JSON.stringify(calls);
-  assert.doesNotMatch(serialized, /5548999999999|mensagem secreta|api[_-]?key|token/i);
+  for (const secret of [eventId, messageId, phoneNumber, "contact-secret", "conversation-secret"]) {
+    assert.equal(serialized.includes(secret), false, secret);
+  }
+  assert.match(serialized, new RegExp(fingerprintIdentifier(eventId)));
+  assert.match(serialized, new RegExp(fingerprintIdentifier(messageId)));
+  assert.match(serialized, new RegExp(fingerprintIdentifier(phoneNumber)));
+  assert.doesNotMatch(serialized, /mensagem secreta|api[_-]?key|token/i);
 });
