@@ -9,6 +9,8 @@ import { HANDOFF_ACKNOWLEDGEMENT } from "@/lib/handoff/detection";
 import { buildHandoffSummary } from "@/lib/handoff/summary";
 import { NextfitClient } from "@/lib/nextfit/client";
 import { createNextfitEnricher } from "@/lib/nextfit/sync-customer";
+import { enqueueInAppNotification } from "@/lib/notifications/repository";
+import { buildHandoffRequestedNotification } from "@/lib/notifications/rules";
 import { logProcessingEvent } from "@/lib/observability/safe-log";
 import { ZernioWhatsAppProvider } from "@/lib/whatsapp/zernio-provider";
 
@@ -16,9 +18,14 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 function notification(provider: ZernioWhatsAppProvider) {
-  if (!process.env.HANDOFF_ATTENDANT_PHONE || !process.env.ZERNIO_HANDOFF_TEMPLATE_NAME) return undefined;
   return async (input: { conversationId: string; firstName?: string; reason: string; summary: string;
     idempotencyKey: string; accountId: string }) => {
+    await enqueueInAppNotification(buildHandoffRequestedNotification({
+      conversationId: input.conversationId,
+      firstName: input.firstName,
+      dedupeKey: input.idempotencyKey,
+    }));
+    if (!process.env.HANDOFF_ATTENDANT_PHONE || !process.env.ZERNIO_HANDOFF_TEMPLATE_NAME) return;
     const baseUrl = process.env.APP_URL ?? "https://prohealthfloripa.vercel.app";
     await provider.sendTemplate({ accountId: input.accountId,
       participantId: process.env.HANDOFF_ATTENDANT_PHONE!,
@@ -68,7 +75,7 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
       generateReply: generateWhatsAppReplyPlan,
       ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey),
         store: repository }) } : {}),
-      ...(notifyHandoff ? { notifyHandoff } : {}) });
+      notifyHandoff });
     logProcessingEvent("info", { event: "WhatsApp turn processing completed",
       eventId: metadata.messageId, messageId: metadata.messageId, result });
   } catch (error) {

@@ -36,17 +36,29 @@ function normalizeItems(items: NextfitContractBase[]): Array<{ id: string; name:
 export async function syncNextfitCatalog(api: Pick<NextfitApi, "listContractBases">): Promise<number> {
   await ensureCatalogSchema();
   const sql = getDatabase();
-  const items = normalizeItems(await api.listContractBases());
-  const now = new Date();
-  await sql.transaction((tx) => [
-    tx`UPDATE catalog_items SET active=false, updated_at=now() WHERE source='nextfit'`,
-    ...items.map((item) => tx`INSERT INTO catalog_items (source, external_id, name, active, synced_at)
-      VALUES ('nextfit', ${item.id}, ${item.name}, true, ${now})
-      ON CONFLICT (source, external_id) DO UPDATE SET name=EXCLUDED.name, active=true,
-        synced_at=EXCLUDED.synced_at, updated_at=now()`),
-    tx`INSERT INTO catalog_sync_runs (source, status, item_count) VALUES ('nextfit', 'succeeded', ${items.length})`,
-  ]);
-  return items.length;
+  try {
+    const items = normalizeItems(await api.listContractBases());
+    const now = new Date();
+    await sql.transaction((tx) => [
+      tx`UPDATE catalog_items SET active=false, updated_at=now() WHERE source='nextfit'`,
+      ...items.map((item) => tx`INSERT INTO catalog_items (source, external_id, name, active, synced_at)
+        VALUES ('nextfit', ${item.id}, ${item.name}, true, ${now})
+        ON CONFLICT (source, external_id) DO UPDATE SET name=EXCLUDED.name, active=true,
+          synced_at=EXCLUDED.synced_at, updated_at=now()`),
+      tx`INSERT INTO catalog_sync_runs (source, status, item_count) VALUES ('nextfit', 'succeeded', ${items.length})`,
+    ]);
+    return items.length;
+  } catch (error) {
+    try {
+      await sql`INSERT INTO catalog_sync_runs (source, status, item_count) VALUES ('nextfit', 'failed', 0)`;
+    } catch (persistenceError) {
+      console.warn("Catalog sync failure could not be recorded", {
+        error: persistenceError instanceof Error ? persistenceError.name : "UnknownError",
+      });
+    }
+    console.warn("Nextfit catalog sync failed", { error: error instanceof Error ? error.name : "UnknownError" });
+    throw error;
+  }
 }
 
 export async function getNextfitCatalogContext(): Promise<string | undefined> {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { syncNextfitCatalog } from "@/lib/catalog/nextfit-catalog";
-import { isHandoffAuthenticated } from "@/lib/handoff/server-auth";
+import { isAppAuthorizationError, requireAppUser } from "@/lib/handoff/server-auth";
 import { NextfitClient } from "@/lib/nextfit/client";
 
 export const runtime = "nodejs";
@@ -27,11 +27,14 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!(await isHandoffAuthenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
+    await requireAppUser(["owner", "admin"]);
     await runSync();
     return NextResponse.redirect(new URL("/handoff", request.url), 303);
-  } catch {
+  } catch (error) {
+    if (isAppAuthorizationError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: "Unavailable" }, { status: 503 });
   }
 }

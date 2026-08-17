@@ -1,10 +1,8 @@
-"use client";
-
+import { AsyncActionForm } from "./async-action-form";
 import styles from "./handoff.module.css";
 
 export function CloseHandoffForm({ conversationId }: { conversationId: string }) {
-  return <form action={`/api/handoff/${conversationId}/close`} method="post"
-    onSubmit={(event) => { if (!window.confirm("Encerrar o atendimento humano e devolver a conversa ao agente?")) event.preventDefault(); }}>
-    <button className={styles.close} type="submit">Encerrar e devolver ao agente</button>
-  </form>;
+  return <AsyncActionForm action={`/api/handoff/${conversationId}/close`} buttonClassName={styles.close}
+    idleLabel="Encerrar e devolver ao agente" pendingLabel="Encerrando…"
+    confirmMessage="Encerrar o atendimento humano e devolver a conversa ao agente?" />;
 }

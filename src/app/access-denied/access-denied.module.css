@@ -1,0 +1,48 @@
+.shell {
+  min-height: 100vh;
+  max-width: none;
+  padding: 32px;
+  display: grid;
+  place-items: center;
+  background: #f4f7f5;
+  color: #183128;
+}
+
+.card {
+  width: min(100%, 480px);
+  padding: 32px;
+  border: 1px solid #dfe7e1;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 36px #17352612;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #117a4b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.card h1 {
+  margin: 8px 0 12px;
+  font-size: 28px;
+}
+
+.card p:not(.eyebrow) {
+  margin: 0 0 22px;
+  color: #5f7068;
+  line-height: 1.55;
+}
+
+.card button {
+  border: 0;
+  border-radius: 9px;
+  padding: 11px 15px;
+  background: #147a4c;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}

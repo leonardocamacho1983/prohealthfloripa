@@ -1,93 +1,224 @@
 import { SignOutButton } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
+
+import { hasPermission } from "@/lib/auth/permissions";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
 import type { ConversationStatus } from "@/lib/conversations/types";
-import { isHandoffAuthenticated } from "@/lib/handoff/server-auth";
+import { isAppAuthorizationError, requireAppUser } from "@/lib/handoff/server-auth";
+import {
+  filterAndSortInbox,
+  formatElapsed,
+  isInboxConversationStalled,
+  matchesInboxFilter,
+  type InboxFilter,
+  type InboxSort,
+} from "@/lib/inbox/productivity";
+import {
+  getInboxCustomerPanel,
+  getInboxPhoneSearchIndex,
+  listInboxQuickReplies,
+  type InboxQuickReply,
+} from "@/lib/inbox/repository";
+import { AsyncActionForm } from "./async-action-form";
+import { CloseHandoffForm } from "./close-form";
+import { CustomerPanel } from "./customer-panel";
 import styles from "./handoff.module.css";
 import { HandoffLiveRefresh } from "./handoff-live";
-import { CloseHandoffForm } from "./close-form";
+import { QuickReplyComposer } from "./quick-reply-composer";
 
 export const dynamic = "force-dynamic";
 
-const formatTime = (date: Date) => new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit",
-  timeZone: "America/Sao_Paulo" }).format(date);
-const elapsed = (date: Date) => {
-  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60_000));
-  if (minutes < 1) return "agora";
-  if (minutes < 60) return `há ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `há ${hours}h` : `há ${Math.floor(hours / 24)}d`;
-};
+const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "America/Sao_Paulo",
+});
+
 const statusLabel: Record<ConversationStatus, string> = {
-  active: "Com o agente", human_requested: "Aguardando", human_active: "Em atendimento", closed: "Encerrada",
+  active: "Com o agente",
+  human_requested: "Aguardando",
+  human_active: "Em atendimento",
+  closed: "Encerrada",
 };
 
-type InboxFilter = "all" | "agent" | "waiting" | "human" | "closed";
-const matchesFilter = (status: ConversationStatus, filter: InboxFilter) => filter === "all"
-  || (filter === "agent" && status === "active")
-  || (filter === "waiting" && status === "human_requested")
-  || (filter === "human" && status === "human_active")
-  || (filter === "closed" && status === "closed");
+const allowedFilters: InboxFilter[] = ["all", "agent", "waiting", "human", "unread", "stalled", "closed"];
+const allowedSorts: InboxSort[] = ["longest_waiting", "recent"];
 
-export default async function HandoffPage({ searchParams }: { searchParams: Promise<{ conversation?: string; filter?: string }> }) {
-  if (!(await isHandoffAuthenticated())) redirect("/sign-in");
-  const repository = new NeonConversationRepository();
-  const conversations = await repository.listInboxConversations();
+type InboxSearchParams = {
+  conversation?: string;
+  filter?: string;
+  q?: string;
+  sort?: string;
+};
+
+export default async function HandoffPage({ searchParams }: { searchParams: Promise<InboxSearchParams> }) {
+  let appUser;
+  try {
+    appUser = await requireAppUser();
+  } catch (error) {
+    if (isAppAuthorizationError(error)) {
+      if (error.status === 401) redirect("/sign-in");
+      if (error.status === 403) redirect("/access-denied");
+    }
+    throw error;
+  }
+  const canOperate = hasPermission(appUser.role, "handoff:reply");
+  const canManage = appUser.role === "admin" || appUser.role === "owner";
   const params = await searchParams;
-  const allowedFilters: InboxFilter[] = ["all", "agent", "waiting", "human", "closed"];
-  const filter: InboxFilter = allowedFilters.includes(params.filter as InboxFilter) ? params.filter as InboxFilter : "all";
-  const filtered = conversations.filter((item) => matchesFilter(item.status, filter));
+  const filter: InboxFilter = allowedFilters.includes(params.filter as InboxFilter)
+    ? params.filter as InboxFilter
+    : "all";
+  const sort: InboxSort = allowedSorts.includes(params.sort as InboxSort)
+    ? params.sort as InboxSort
+    : "longest_waiting";
+  const query = params.q?.trim().slice(0, 80) ?? "";
+  const now = new Date();
+
+  const repository = new NeonConversationRepository();
+  const [conversations, phoneIndex] = await Promise.all([
+    repository.listInboxConversations(),
+    getInboxPhoneSearchIndex(),
+  ]);
+  const searchableConversations = conversations.map((item) => ({
+    ...item,
+    searchablePhone: phoneIndex.get(item.id),
+  }));
+  const filtered = filterAndSortInbox(searchableConversations, { filter, query, sort, now });
   const selectedId = params.conversation ?? filtered[0]?.id;
   const selected = filtered.find((item) => item.id === selectedId);
-  if (selected) await repository.markHandoffViewed(selected.id);
-  const count = (status: ConversationStatus) => conversations.filter((item) => item.status === status).length;
-  const linkFor = (nextFilter: InboxFilter, conversation?: string) => `/handoff?filter=${nextFilter}${conversation ? `&conversation=${conversation}` : ""}`;
+
+  const selectedResources = selected
+    ? await Promise.all([
+      getInboxCustomerPanel(selected.id),
+      listInboxQuickReplies(),
+      repository.markHandoffViewed(selected.id),
+    ]).then(([panel, replies]) => ({ panel, replies }))
+    : { panel: undefined, replies: [] as InboxQuickReply[] };
+  const customerPanel = selectedResources.panel;
+  const quickReplies = selectedResources.replies;
+
+  const countFor = (nextFilter: InboxFilter) => searchableConversations
+    .filter((item) => matchesInboxFilter(item, nextFilter, now)).length;
+  const linkFor = (nextFilter: InboxFilter, conversation?: string, nextQuery = query, nextSort = sort) => {
+    const next = new URLSearchParams({ filter: nextFilter, sort: nextSort });
+    if (nextQuery) next.set("q", nextQuery);
+    if (conversation) next.set("conversation", conversation);
+    return `/handoff?${next.toString()}`;
+  };
+  const returnTo = selected ? linkFor(filter, selected.id) : linkFor(filter);
+
+  const filterLinks: Array<{ value: InboxFilter; label: string }> = [
+    { value: "all", label: "Todas" },
+    { value: "agent", label: "Agente" },
+    { value: "waiting", label: "Aguardando" },
+    { value: "human", label: "Humano" },
+    { value: "unread", label: "Não lidas" },
+    { value: "stalled", label: "Paradas" },
+    { value: "closed", label: "Encerradas" },
+  ];
 
   return <main className={styles.shell}>
     <HandoffLiveRefresh />
-    <header className={styles.header}><div><p className={styles.eyebrow}>ProHealth</p><h1>Atendimento</h1></div>
-      <div className={styles.headerActions}><span className={styles.queueCount}>{conversations.length} {conversations.length === 1 ? "conversa" : "conversas"}</span>
-        <form action="/api/catalog/sync" method="post"><button className={styles.logout}>Atualizar catálogo</button></form>
-        <SignOutButton redirectUrl="/sign-in"><button className={styles.logout} type="button">Sair</button></SignOutButton></div></header>
+    <header className={styles.header}>
+      <div className={styles.headerIdentity}><p className={styles.eyebrow}>ProHealth</p><h1>Atendimento</h1></div>
+      <div className={styles.headerActions}>
+        <span className={styles.queueCount}>{conversations.length} {conversations.length === 1 ? "conversa" : "conversas"}</span>
+        {canManage ? <nav className={styles.headerNav} aria-label="Administração"><a className={styles.logout} href="/metrics">Indicadores</a>
+          <a className={styles.logout} href="/admin/users">Usuários</a>
+          <AsyncActionForm action="/api/catalog/sync" buttonClassName={styles.logout}
+            idleLabel="Atualizar catálogo" pendingLabel="Atualizando…" /></nav> : null}
+        <SignOutButton redirectUrl="/sign-in"><button className={styles.logout} type="button">Sair</button></SignOutButton>
+      </div>
+    </header>
+
     <div className={styles.workspace}>
       <aside className={styles.queue} aria-label="Conversas">
+        <form className={styles.searchForm} action="/handoff" method="get">
+          <input type="hidden" name="filter" value={filter} />
+          <label className={styles.srOnly} htmlFor="inbox-search">Buscar por nome ou telefone</label>
+          <input id="inbox-search" type="search" name="q" defaultValue={query} maxLength={80}
+            placeholder="Buscar nome ou telefone" />
+          <label className={styles.srOnly} htmlFor="inbox-sort">Ordenar conversas</label>
+          <select id="inbox-sort" name="sort" defaultValue={sort}>
+            <option value="longest_waiting">Maior espera</option>
+            <option value="recent">Mais recentes</option>
+          </select>
+          <button type="submit">Aplicar</button>
+          {query ? <a href={linkFor(filter, undefined, "")}>Limpar busca</a> : null}
+        </form>
+
         <nav className={styles.filters} aria-label="Filtrar conversas">
-          <a className={filter === "all" ? styles.filterActive : ""} href={linkFor("all")}>Todas <span>{conversations.length}</span></a>
-          <a className={filter === "agent" ? styles.filterActive : ""} href={linkFor("agent")}>Agente <span>{count("active")}</span></a>
-          <a className={filter === "waiting" ? styles.filterActive : ""} href={linkFor("waiting")}>Aguardando <span>{count("human_requested")}</span></a>
-          <a className={filter === "human" ? styles.filterActive : ""} href={linkFor("human")}>Humano <span>{count("human_active")}</span></a>
-          <a className={filter === "closed" ? styles.filterActive : ""} href={linkFor("closed")}>Encerradas <span>{count("closed")}</span></a>
+          {filterLinks.map((item) => <a key={item.value}
+            className={filter === item.value ? styles.filterActive : ""} href={linkFor(item.value)}
+            aria-current={filter === item.value ? "page" : undefined}>
+            {item.label} <span>{countFor(item.value)}</span>
+          </a>)}
         </nav>
-        {filtered.length === 0 ? <div className={styles.empty}><h2>Tudo em dia</h2><p>Nenhuma conversa neste filtro.</p></div> : filtered.map((item) =>
-          <a key={item.id} href={linkFor(filter, item.id)} className={`${styles.queueItem} ${item.id === selected?.id ? styles.selected : ""}`}>
-            <span className={styles.avatar}>{(item.firstName?.[0] ?? "C").toUpperCase()}</span><span><strong>{item.firstName ?? "Cliente"}</strong>
-            <small>{item.messages.at(-1)?.content ?? item.reason ?? "Sem mensagens"}</small><em className={`${styles.rowStatus} ${styles[`status_${item.status}`]}`}>{statusLabel[item.status]}</em></span>
-            <span className={styles.queueMeta}><time>{elapsed(item.lastActivityAt)}</time>
-              {item.id !== selected?.id && item.unreadCount > 0 ? <b aria-label={`${item.unreadCount} mensagens novas`}>{item.unreadCount}</b> : null}</span></a>)}
+
+        {filtered.length === 0 ? <div className={styles.empty}>
+          <h2>{query ? "Nenhuma conversa encontrada" : "Tudo em dia"}</h2>
+          <p>{query ? "Tente buscar por outro nome ou telefone." : "Nenhuma conversa neste filtro."}</p>
+        </div> : filtered.map((item) => {
+          const stalled = isInboxConversationStalled(item, now);
+          return <a key={item.id} href={linkFor(filter, item.id)}
+            className={`${styles.queueItem} ${item.id === selected?.id ? styles.selected : ""}`}
+            aria-current={item.id === selected?.id ? "page" : undefined}>
+            <span className={styles.avatar}>{(item.firstName?.[0] ?? "C").toUpperCase()}</span>
+            <span><strong>{item.firstName ?? "Cliente"}</strong>
+              <small>{item.messages.at(-1)?.content ?? item.reason ?? "Sem mensagens"}</small>
+              <span className={styles.rowLabels}>
+                <em className={`${styles.rowStatus} ${styles[`status_${item.status}`]}`}>{statusLabel[item.status]}</em>
+                {stalled ? <em className={styles.stalledLabel}>Parada</em> : null}
+              </span>
+            </span>
+            <span className={styles.queueMeta}><time dateTime={item.lastActivityAt.toISOString()}>
+              {formatElapsed(item.lastActivityAt, now)}</time>
+              {item.id !== selected?.id && item.unreadCount > 0
+                ? <b aria-label={`${item.unreadCount} mensagens novas`}>{item.unreadCount}</b>
+                : null}</span>
+          </a>;
+        })}
       </aside>
-      <section className={styles.detail}>
-        {!selected ? <div className={styles.noSelection}><h2>Nenhuma conversa selecionada</h2><p>As conversas do agente e os atendimentos humanos aparecerão aqui.</p></div> : <>
-          <div className={styles.detailHeader}><div><h2>{selected.firstName ?? "Cliente"}</h2><p>{selected.maskedPhone} · última atividade {elapsed(selected.lastActivityAt)}</p></div>
-            <span className={`${styles.status} ${styles[`status_${selected.status}`]}`}>{statusLabel[selected.status]}</span></div>
-          {selected.status === "human_requested" || selected.status === "human_active" ? <div className={styles.summary}>
-            <strong>Resumo para atendimento</strong><p>{selected.summary}</p></div> : null}
-          <div className={styles.messages}>{selected.messages.map((message) => <div key={message.id}
-            className={message.direction === "inbound" ? styles.inbound : styles.outbound}>
-            <p>{message.content}</p><time>{formatTime(message.createdAt)}</time></div>)}</div>
-          <div className={styles.actions}>
-            {selected.status === "active" ? <form action={`/api/handoff/${selected.id}/assume`} method="post">
-              <button className={styles.secondary}>Assumir conversa</button></form> : null}
-            {selected.status === "human_requested" ? <form action={`/api/handoff/${selected.id}/take`} method="post">
-              <button className={styles.secondary}>Assumir conversa</button></form> : null}
-            {selected.status === "human_requested" || selected.status === "human_active" ? <CloseHandoffForm conversationId={selected.id} /> : null}
-          </div>
-          {selected.status === "human_requested" || selected.status === "human_active" ? <form action={`/api/handoff/${selected.id}/reply`} method="post" className={styles.composer}>
-            <label htmlFor="message" className={styles.srOnly}>Mensagem</label><textarea id="message" name="message" required maxLength={1500} placeholder="Escreva uma mensagem…" />
-            <button type="submit">Enviar</button></form> : <div className={styles.readOnlyNote}>{selected.status === "active"
-              ? "O agente continua respondendo. Assuma a conversa para falar com o cliente."
-              : "Conversa encerrada disponível apenas para consulta."}</div>}
-        </>}
-      </section>
+
+      <div className={styles.conversationWorkspace}>
+        <section className={styles.detail}>
+          {!selected ? <div className={styles.noSelection}><h2>Nenhuma conversa selecionada</h2>
+            <p>As conversas do agente e os atendimentos humanos aparecerão aqui.</p></div> : <>
+            <div className={styles.detailHeader}>
+              <div><h2>{selected.firstName ?? "Cliente"}</h2>
+                <p>{selected.maskedPhone} · última atividade <time dateTime={selected.lastActivityAt.toISOString()}>
+                  {formatElapsed(selected.lastActivityAt, now)}</time></p></div>
+              <span className={`${styles.status} ${styles[`status_${selected.status}`]}`}>{statusLabel[selected.status]}</span>
+            </div>
+            {selected.status === "human_requested" || selected.status === "human_active" ? <div className={styles.summary}>
+              <strong>Resumo para atendimento</strong><p>{selected.summary}</p>
+            </div> : null}
+            <div className={styles.messages}>{selected.messages.map((message) => <div key={message.id}
+              className={message.direction === "inbound" ? styles.inbound : styles.outbound}>
+              <p>{message.content}</p><time dateTime={message.createdAt.toISOString()}>
+                {timeFormatter.format(message.createdAt)}</time>
+            </div>)}</div>
+            {canOperate ? <div className={styles.actions}>
+              {selected.status === "active" ? <AsyncActionForm action={`/api/handoff/${selected.id}/assume`}
+                buttonClassName={styles.secondary} idleLabel="Assumir conversa" pendingLabel="Assumindo…" /> : null}
+              {selected.status === "human_requested" ? <AsyncActionForm action={`/api/handoff/${selected.id}/take`}
+                buttonClassName={styles.secondary} idleLabel="Assumir conversa" pendingLabel="Assumindo…" /> : null}
+              {selected.status === "human_requested" || selected.status === "human_active"
+                ? <CloseHandoffForm conversationId={selected.id} />
+                : null}
+            </div> : null}
+            {canOperate && (selected.status === "human_requested" || selected.status === "human_active")
+              ? <QuickReplyComposer conversationId={selected.id} quickReplies={quickReplies} />
+              : <div className={styles.readOnlyNote}>{!canOperate
+                ? "Acesso em modo leitura."
+                : selected.status === "active"
+                  ? "O agente continua respondendo. Assuma a conversa para falar com o cliente."
+                  : "Conversa encerrada disponível apenas para consulta."}</div>}
+          </>}
+        </section>
+        {selected ? <CustomerPanel conversationId={selected.id} panel={customerPanel} quickReplies={quickReplies}
+          returnTo={returnTo} canOperate={canOperate} now={now} /> : null}
+      </div>
     </div>
   </main>;
 }

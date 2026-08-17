@@ -36,7 +36,7 @@ npm run build
 
 ## Deploy na Vercel
 
-Use Node.js 22 ou superior. Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, mantenha a integração Clerk conectada aos ambientes desejados, cadastre as variáveis Zernio e `CRON_SECRET` e faça um novo deploy. A integração Clerk fornece `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` e `CLERK_SECRET_KEY`; não crie cópias dessas chaves. A Vercel provisiona o consumidor de Queue descrito em `vercel.json`; não é necessária uma credencial adicional para a fila. A aplicação aplica de forma idempotente as evoluções de banco versionadas em `migrations/0002_handoffs.sql`, `migrations/0003_conversation_orchestration.sql` e `migrations/0004_nextfit_catalog_cache.sql` no primeiro uso.
+Use Node.js 22 ou superior. Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, mantenha a integração Clerk conectada aos ambientes desejados, cadastre as variáveis Zernio e `CRON_SECRET` e faça um novo deploy. A integração Clerk fornece `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` e `CLERK_SECRET_KEY`; não crie cópias dessas chaves. A Vercel provisiona o consumidor de Queue descrito em `vercel.json`; não é necessária uma credencial adicional para a fila. A aplicação aplica de forma idempotente as evoluções de banco versionadas em `migrations/0002_handoffs.sql` até `migrations/0007_metrics_notifications.sql` no primeiro uso.
 
 ## Zernio Sandbox
 
@@ -67,10 +67,18 @@ Os nomes ativos de contratos/produtos são copiados para um cache derivado no Ne
 
 Para testar, envie uma mensagem pelo número de WhatsApp que também esteja cadastrado na Nextfit. Perguntas como “quando vence meu plano?” ou “quando é minha próxima visita?” usam o snapshot atual quando esses dados existirem. Confirme a execução nos logs da Vercel e, no Neon, verifique `contacts.relationship_status`, `customer_profiles.external_customer_id`, `source` e `synced_at`.
 
+## Acesso da equipe
+
+Acesse `https://prohealthfloripa.vercel.app/sign-in` e entre pelo método habilitado no Clerk. O e-mail primário verificado `leonardocamacho@gmail.com` recebe a função inicial de administrador no primeiro acesso caso ainda não tenha uma função definida. Depois disso, administradores podem convidar usuários e definir as funções **atendente**, **administrador** e, quando permitido, **proprietário** em `/admin/users`.
+
+As permissões são verificadas no servidor. Atendentes operam a caixa; administradores e proprietários também gerenciam usuários, sincronizam o catálogo e acessam os indicadores. Alterações administrativas e ações de atendimento geram auditoria operacional sem conteúdo das mensagens, telefones ou credenciais.
+
 ## Atendimento humano
 
 Quando o cliente pede uma pessoa ou a conversa entra em uma regra sensível, o agente confirma a transferência e fica em silêncio. A espera não expira, inclusive fora do horário de atendimento. A Bia entra com sua conta individual do Clerk e responde em `https://prohealthfloripa.vercel.app/handoff`; a mensagem continua saindo pelo número principal da ProHealth. Ao encerrar, o agente volta a atender. Como proteção contra atendimentos esquecidos abertos, somente uma conversa já assumida expira após 12 horas sem atividade.
 
-A caixa atualiza automaticamente a cada 15 segundos, separa conversas aguardando e assumidas, destaca novas mensagens e exige confirmação antes de devolver o atendimento ao agente. As ações de solicitar, assumir, responder e encerrar são registradas como eventos operacionais sem copiar o conteúdo das mensagens para o log de auditoria. O cadastro público fica oculto na aplicação; mantenha a criação de usuários restrita a convites no painel do Clerk.
+A caixa atualiza automaticamente a cada 15 segundos, inclui busca por nome ou telefone, filtros de não lidas e paradas, ordenação por tempo de espera, respostas rápidas, notas internas e um painel do cliente com o contexto disponível na Nextfit. Ela separa conversas do agente, aguardando, assumidas e encerradas, destaca novas mensagens e exige confirmação antes de devolver o atendimento ao agente.
 
-Para receber o aviso no WhatsApp da Bia, crie na Zernio um template utilitário com quatro variáveis, nesta ordem: **nome do cliente**, **motivo**, **resumo** e **link da conversa**. Cadastre o nome e o idioma nas variáveis acima. A notificação é opcional: mesmo sem o template, as conversas aparecem na caixa protegida.
+O painel `/metrics` mostra volume, latências p50/p95, cobertura, handoffs, falhas de entrega, saúde do catálogo e alertas operacionais. Valores comerciais aparecem apenas como eventos associados com evidência; não são atribuídos causalmente ao agente. Indicadores de intenção, reparo, duplicação e ordem permanecem explicitamente indisponíveis enquanto a instrumentação correspondente não tiver amostras.
+
+Alertas de novos handoffs já são registrados no painel. Para também receber o aviso no WhatsApp da atendente, crie na Zernio um template utilitário com quatro variáveis, nesta ordem: **nome do cliente**, **motivo**, **resumo** e **link da conversa**. Cadastre o telefone, o nome do template e o idioma nas variáveis acima. Essa notificação externa é opcional e pode ser ativada depois; mesmo sem ela, as conversas aparecem na caixa protegida.
