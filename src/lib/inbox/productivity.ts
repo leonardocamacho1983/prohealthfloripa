@@ -9,6 +9,26 @@ export type SearchableInboxConversation = InboxConversation & {
   searchablePhone?: string;
 };
 
+export function parseDateValue(value: unknown): Date | undefined {
+  if (!(value instanceof Date) && typeof value !== "string" && typeof value !== "number") return undefined;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date : undefined;
+}
+
+export function normalizeDateOnly(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const dateOnly = /^(\d{4}-\d{2}-\d{2})(?:$|T|\s)/.exec(value.trim())?.[1];
+    if (dateOnly) {
+      const parsed = new Date(`${dateOnly}T00:00:00.000Z`);
+      return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === dateOnly
+        ? dateOnly
+        : undefined;
+    }
+  }
+
+  return parseDateValue(value)?.toISOString().slice(0, 10);
+}
+
 const normalizeText = (value: string) => value
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "")

@@ -7,6 +7,8 @@ import {
   formatElapsed,
   isInboxConversationStalled,
   matchesInboxSearch,
+  normalizeDateOnly,
+  parseDateValue,
   safeInboxReturnPath,
 } from "./productivity.ts";
 
@@ -69,6 +71,19 @@ test("tempo relativo usa minutos, horas e dias", () => {
   assert.equal(formatElapsed(new Date("2026-08-16T14:45:00.000Z"), now), "há 15 min");
   assert.equal(formatElapsed(new Date("2026-08-16T12:00:00.000Z"), now), "há 3h");
   assert.equal(formatElapsed(new Date("2026-08-14T15:00:00.000Z"), now), "há 2d");
+});
+
+test("normaliza datas do Postgres sem depender do tipo retornado pelo driver", () => {
+  assert.equal(normalizeDateOnly("2026-08-16"), "2026-08-16");
+  assert.equal(normalizeDateOnly(new Date("2026-08-16T00:00:00.000Z")), "2026-08-16");
+  assert.equal(normalizeDateOnly("2026-02-30"), undefined);
+  assert.equal(normalizeDateOnly("data-invalida"), undefined);
+});
+
+test("rejeita timestamps inválidos antes que alcancem a interface", () => {
+  assert.equal(parseDateValue("2026-08-16T12:30:00.000Z")?.toISOString(), "2026-08-16T12:30:00.000Z");
+  assert.equal(parseDateValue(new Date("invalid")), undefined);
+  assert.equal(parseDateValue(null), undefined);
 });
 
 test("redirecionamento de formulário aceita somente caminhos da inbox", () => {

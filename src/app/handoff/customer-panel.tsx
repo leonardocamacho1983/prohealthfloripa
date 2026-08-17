@@ -1,5 +1,5 @@
 import type { InboxCustomerPanel, InboxQuickReply } from "@/lib/inbox/repository";
-import { formatElapsed } from "@/lib/inbox/productivity";
+import { formatElapsed, normalizeDateOnly } from "@/lib/inbox/productivity";
 import styles from "./handoff.module.css";
 import { InternalNoteForm } from "./internal-note-form";
 import { QuickReplyEditor } from "./quick-reply-editor";
@@ -34,7 +34,11 @@ const financialLabels: Record<string, string> = {
   overdue: "Com pendência",
 };
 
-const formatStoredDate = (value: string) => dateFormatter.format(new Date(`${value}T12:00:00-03:00`));
+const formatStoredDate = (value: string) => {
+  const normalized = normalizeDateOnly(value);
+  if (!normalized) return "Data indisponível";
+  return dateFormatter.format(new Date(`${normalized}T12:00:00-03:00`));
+};
 
 export function CustomerPanel({ conversationId, panel, quickReplies, returnTo, canOperate, now }: {
   conversationId: string;

@@ -1,5 +1,6 @@
 import { getDatabase } from "@/lib/db/neon";
 import type { RelationshipStatus } from "@/lib/conversations/types";
+import { normalizeDateOnly, parseDateValue } from "@/lib/inbox/productivity";
 
 export type InboxInternalNote = {
   id: string;
@@ -66,8 +67,6 @@ function ensureInboxProductivitySchema(): Promise<void> {
   return inboxSchemaPromise;
 }
 
-const asDate = (value: Date | string | null): Date | undefined => value ? new Date(value) : undefined;
-
 function recordArray(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
@@ -129,7 +128,7 @@ export async function getInboxCustomerPanel(conversationId: string): Promise<Inb
   ]);
   const row = rows[0] as {
     relationship_status: RelationshipStatus;
-    customer_since: string | null;
+    customer_since: Date | string | null;
     financial_status: string | null;
     last_visit_at: Date | string | null;
     next_visit_at: Date | string | null;
@@ -138,13 +137,17 @@ export async function getInboxCustomerPanel(conversationId: string): Promise<Inb
     synced_at: Date | string | null;
   } | undefined;
   if (!row) return undefined;
+  const customerSince = normalizeDateOnly(row.customer_since);
+  const lastVisitAt = parseDateValue(row.last_visit_at);
+  const nextVisitAt = parseDateValue(row.next_visit_at);
+  const syncedAt = parseDateValue(row.synced_at);
   return {
     relationshipStatus: row.relationship_status,
-    ...(row.customer_since ? { customerSince: row.customer_since } : {}),
+    ...(customerSince ? { customerSince } : {}),
     ...(row.financial_status ? { financialStatus: row.financial_status } : {}),
-    ...(asDate(row.last_visit_at) ? { lastVisitAt: asDate(row.last_visit_at) } : {}),
-    ...(asDate(row.next_visit_at) ? { nextVisitAt: asDate(row.next_visit_at) } : {}),
-    ...(asDate(row.synced_at) ? { syncedAt: asDate(row.synced_at) } : {}),
+    ...(lastVisitAt ? { lastVisitAt } : {}),
+    ...(nextVisitAt ? { nextVisitAt } : {}),
+    ...(syncedAt ? { syncedAt } : {}),
     activeServices: serviceNames(row.active_contracts),
     recentServices: consumedServiceNames(row.consumed_services_summary),
     notes,
