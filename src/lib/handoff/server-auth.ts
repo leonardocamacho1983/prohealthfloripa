@@ -1,7 +1,6 @@
-import { cookies } from "next/headers";
-import { HANDOFF_COOKIE, isValidHandoffSession } from "./auth";
+import { auth } from "@clerk/nextjs/server";
 
 export async function isHandoffAuthenticated(): Promise<boolean> {
-  const store = await cookies();
-  return isValidHandoffSession(store.get(HANDOFF_COOKIE)?.value, process.env.HANDOFF_ACCESS_SECRET);
+  const { userId } = await auth();
+  return Boolean(userId);
 }

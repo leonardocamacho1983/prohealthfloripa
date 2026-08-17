@@ -18,7 +18,8 @@ Crie um `.env.local` a partir do `.env.example` e preencha localmente:
 - `NEXTFIT_API_KEY`: chave da API pública da Nextfit. É usada somente no servidor pelo cabeçalho `X-Api-Key`.
 - `ZERNIO_API_KEY`: chave de API da Zernio com permissão de escrita no Inbox.
 - `ZERNIO_WEBHOOK_SECRET`: segredo forte definido por você e repetido na configuração do webhook da Zernio.
-- `HANDOFF_ACCESS_SECRET`: chave forte usada pela Bia para entrar na caixa de atendimentos em `/handoff`.
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: chave publicável do Clerk, sincronizada automaticamente pela integração Clerk da Vercel.
+- `CLERK_SECRET_KEY`: chave server-only do Clerk, sincronizada automaticamente pela integração Clerk da Vercel. Nunca a exponha no cliente.
 - `HANDOFF_ATTENDANT_PHONE`: telefone da Bia em formato internacional, sem espaços (ex.: `55...`).
 - `ZERNIO_HANDOFF_TEMPLATE_NAME`: nome do template aprovado para avisar a Bia sobre um novo atendimento.
 - `ZERNIO_HANDOFF_TEMPLATE_LANGUAGE`: idioma do template; por padrão, `pt_BR`.
@@ -35,7 +36,7 @@ npm run build
 
 ## Deploy na Vercel
 
-Use Node.js 22 ou superior. Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, cadastre as variáveis Zernio e `CRON_SECRET` e faça um novo deploy. A Vercel provisiona o consumidor de Queue descrito em `vercel.json`; não é necessária uma credencial adicional para a fila. A aplicação aplica de forma idempotente as evoluções de banco versionadas em `migrations/0002_handoffs.sql`, `migrations/0003_conversation_orchestration.sql` e `migrations/0004_nextfit_catalog_cache.sql` no primeiro uso.
+Use Node.js 22 ou superior. Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon para fornecer `DATABASE_URL`, mantenha a integração Clerk conectada aos ambientes desejados, cadastre as variáveis Zernio e `CRON_SECRET` e faça um novo deploy. A integração Clerk fornece `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` e `CLERK_SECRET_KEY`; não crie cópias dessas chaves. A Vercel provisiona o consumidor de Queue descrito em `vercel.json`; não é necessária uma credencial adicional para a fila. A aplicação aplica de forma idempotente as evoluções de banco versionadas em `migrations/0002_handoffs.sql`, `migrations/0003_conversation_orchestration.sql` e `migrations/0004_nextfit_catalog_cache.sql` no primeiro uso.
 
 ## Zernio Sandbox
 
@@ -68,8 +69,8 @@ Para testar, envie uma mensagem pelo número de WhatsApp que também esteja cada
 
 ## Atendimento humano
 
-Quando o cliente pede uma pessoa ou a conversa entra em uma regra sensível, o agente confirma a transferência e fica em silêncio. A espera não expira, inclusive fora do horário de atendimento. A Bia responde em `https://prohealthfloripa.vercel.app/handoff`; a mensagem continua saindo pelo número principal da ProHealth. Ao encerrar, o agente volta a atender. Como proteção contra atendimentos esquecidos abertos, somente uma conversa já assumida expira após 12 horas sem atividade.
+Quando o cliente pede uma pessoa ou a conversa entra em uma regra sensível, o agente confirma a transferência e fica em silêncio. A espera não expira, inclusive fora do horário de atendimento. A Bia entra com sua conta individual do Clerk e responde em `https://prohealthfloripa.vercel.app/handoff`; a mensagem continua saindo pelo número principal da ProHealth. Ao encerrar, o agente volta a atender. Como proteção contra atendimentos esquecidos abertos, somente uma conversa já assumida expira após 12 horas sem atividade.
 
-A caixa atualiza automaticamente a cada 15 segundos, separa conversas aguardando e assumidas, destaca novas mensagens e exige confirmação antes de devolver o atendimento ao agente. As ações de solicitar, assumir, responder e encerrar são registradas como eventos operacionais sem copiar o conteúdo das mensagens para o log de auditoria.
+A caixa atualiza automaticamente a cada 15 segundos, separa conversas aguardando e assumidas, destaca novas mensagens e exige confirmação antes de devolver o atendimento ao agente. As ações de solicitar, assumir, responder e encerrar são registradas como eventos operacionais sem copiar o conteúdo das mensagens para o log de auditoria. O cadastro público fica oculto na aplicação; mantenha a criação de usuários restrita a convites no painel do Clerk.
 
 Para receber o aviso no WhatsApp da Bia, crie na Zernio um template utilitário com quatro variáveis, nesta ordem: **nome do cliente**, **motivo**, **resumo** e **link da conversa**. Cadastre o nome e o idioma nas variáveis acima. A notificação é opcional: mesmo sem o template, as conversas aparecem na caixa protegida.

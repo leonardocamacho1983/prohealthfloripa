@@ -1,3 +1,4 @@
+import { SignOutButton } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
 import type { ConversationStatus } from "@/lib/conversations/types";
@@ -29,7 +30,7 @@ const matchesFilter = (status: ConversationStatus, filter: InboxFilter) => filte
   || (filter === "closed" && status === "closed");
 
 export default async function HandoffPage({ searchParams }: { searchParams: Promise<{ conversation?: string; filter?: string }> }) {
-  if (!(await isHandoffAuthenticated())) redirect("/handoff/login");
+  if (!(await isHandoffAuthenticated())) redirect("/sign-in");
   const repository = new NeonConversationRepository();
   const conversations = await repository.listInboxConversations();
   const params = await searchParams;
@@ -47,7 +48,7 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
     <header className={styles.header}><div><p className={styles.eyebrow}>ProHealth</p><h1>Atendimento</h1></div>
       <div className={styles.headerActions}><span className={styles.queueCount}>{conversations.length} {conversations.length === 1 ? "conversa" : "conversas"}</span>
         <form action="/api/catalog/sync" method="post"><button className={styles.logout}>Atualizar catálogo</button></form>
-        <form action="/api/handoff/logout" method="post"><button className={styles.logout}>Sair</button></form></div></header>
+        <SignOutButton redirectUrl="/sign-in"><button className={styles.logout} type="button">Sair</button></SignOutButton></div></header>
     <div className={styles.workspace}>
       <aside className={styles.queue} aria-label="Conversas">
         <nav className={styles.filters} aria-label="Filtrar conversas">

@@ -14,6 +14,7 @@
     "test": "node --test --experimental-strip-types src/lib/**/*.test.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.7.6",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/queue": "^0.4.0",
     "ai": "^7.0.66",

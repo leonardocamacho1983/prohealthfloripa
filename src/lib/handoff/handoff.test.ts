@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isValidHandoffAccessKey, isValidHandoffSession, handoffSessionValue } from "./auth.ts";
 import { detectHandoffRequest } from "./detection.ts";
 import { buildHandoffSummary } from "./summary.ts";
 import { handleIncomingMessage } from "../conversations/handle-incoming-message.ts";
@@ -24,17 +23,6 @@ test("summary is concise and identifies speakers", () => {
   const summary = buildHandoffSummary([{ id: "1", conversationId: "c", direction: "inbound", role: "user",
     content: "Preciso de ajuda", createdAt: new Date() }], "Pedido humano");
   assert.match(summary, /Motivo: Pedido humano/); assert.match(summary, /Cliente: Preciso de ajuda/);
-});
-
-test("handoff session only accepts the correct secret-derived cookie", () => {
-  const value = handoffSessionValue("segredo-forte");
-  assert.equal(isValidHandoffSession(value, "segredo-forte"), true);
-  assert.equal(isValidHandoffSession(value, "outro-segredo"), false);
-});
-
-test("access key comparison rejects an incorrect key", () => {
-  assert.equal(isValidHandoffAccessKey("correta", "correta"), true);
-  assert.equal(isValidHandoffAccessKey("incorreta", "correta"), false);
 });
 
 function flowFixture(status: ConversationStatus = "active") {
