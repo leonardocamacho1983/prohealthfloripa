@@ -10,6 +10,16 @@
           "initialDelaySeconds": 0
         }
       ]
+    },
+    "src/app/api/queues/training-turn/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "prohealth-training-turns",
+          "retryAfterSeconds": 15,
+          "initialDelaySeconds": 0
+        }
+      ]
     }
   },
   "crons": [

@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 type JsonObject = Record<string, unknown>;
 
-export type ZernioTextMessage = {
+type ZernioMessageBase = {
   accountId: string;
   conversationId: string;
   eventId: string;
@@ -11,11 +11,17 @@ export type ZernioTextMessage = {
     id: string;
     phoneNumber?: string;
   };
-  text: string;
 };
 
+export type ZernioTextMessage = ZernioMessageBase & { kind: "text"; text: string };
+export type ZernioAudioMessage = ZernioMessageBase & {
+  kind: "audio";
+  audio: { mediaId: string; mediaType?: string; fileName?: string };
+};
+export type ZernioIncomingMessage = ZernioTextMessage | ZernioAudioMessage;
+
 export type ZernioWebhookParseResult =
-  | { kind: "message"; message: ZernioTextMessage }
+  | { kind: "message"; message: ZernioIncomingMessage }
   | { kind: "ignored"; reason: string }
   | { kind: "invalid"; reason: string };
 
@@ -69,11 +75,6 @@ export function parseZernioWebhook(payload: unknown): ZernioWebhookParseResult {
     return { kind: "ignored", reason: "not_incoming" };
   }
 
-  const text = nonEmptyString(message.text);
-  if (!text) {
-    return { kind: "ignored", reason: "not_text" };
-  }
-
   const sender = message.sender;
   if (!isObject(sender)) {
     return { kind: "invalid", reason: "missing_sender" };
@@ -91,19 +92,50 @@ export function parseZernioWebhook(payload: unknown): ZernioWebhookParseResult {
   }
 
   const phoneNumber = nonEmptyString(sender.phoneNumber);
-
-  return {
-    kind: "message",
-    message: {
-      accountId,
-      conversationId,
-      eventId,
-      messageId,
-      sender: {
-        id: senderId,
-        ...(phoneNumber ? { phoneNumber } : {}),
+  const text = nonEmptyString(message.text);
+  if (text) {
+    return {
+      kind: "message",
+      message: {
+        kind: "text",
+        accountId,
+        conversationId,
+        eventId,
+        messageId,
+        sender: { id: senderId, ...(phoneNumber ? { phoneNumber } : {}) },
+        text,
       },
-      text,
-    },
-  };
+    };
+  }
+
+  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  for (const candidate of attachments) {
+    if (!isObject(candidate)) continue;
+    const payload = isObject(candidate.payload) ? candidate.payload : undefined;
+    const mediaId = nonEmptyString(payload?.id) ?? nonEmptyString(candidate.id);
+    const mediaType = nonEmptyString(candidate.mimeType)
+      ?? nonEmptyString(candidate.mediaType)
+      ?? nonEmptyString(payload?.mimeType);
+    const attachmentType = nonEmptyString(candidate.type) ?? nonEmptyString(payload?.type);
+    if (mediaId && (attachmentType === "audio" || mediaType?.startsWith("audio/"))) {
+      return {
+        kind: "message",
+        message: {
+          kind: "audio",
+          accountId,
+          conversationId,
+          eventId,
+          messageId,
+          sender: { id: senderId, ...(phoneNumber ? { phoneNumber } : {}) },
+          audio: {
+            mediaId,
+            ...(mediaType ? { mediaType } : {}),
+            ...(nonEmptyString(candidate.fileName) ? { fileName: nonEmptyString(candidate.fileName) } : {}),
+          },
+        },
+      };
+    }
+  }
+
+  return { kind: "ignored", reason: "unsupported_message_type" };
 }

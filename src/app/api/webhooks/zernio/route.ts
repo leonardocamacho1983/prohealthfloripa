@@ -5,6 +5,8 @@ import { normalizeBrazilianPhoneNumber } from "@/lib/conversations/phone";
 import { adaptiveBatchDelaySeconds } from "@/lib/conversations/turn-planning";
 import { enqueueWhatsAppTurn } from "@/lib/conversations/turn-queue";
 import { logProcessingEvent } from "@/lib/observability/safe-log";
+import { enqueueTrainingTurn } from "@/lib/training/queue";
+import { TrainingRepository } from "@/lib/training/repository";
 import { ZernioWhatsAppProvider } from "@/lib/whatsapp/zernio-provider";
 import {
   parseZernioWebhook,
@@ -52,14 +54,39 @@ export async function POST(request: Request) {
   }
 
   const { message } = parsed;
-  logProcessingEvent("info", { event: "Zernio text message received",
+  logProcessingEvent("info", { event: `Zernio ${message.kind} message received`,
     eventId: message.eventId, messageId: message.messageId });
+
+  const phoneNumber = normalizeBrazilianPhoneNumber(message.sender.phoneNumber ?? message.sender.id);
+  try {
+    const trainer = await new TrainingRepository().findProfile(phoneNumber, message.accountId);
+    if (trainer) {
+      await enqueueTrainingTurn({ kind: message.kind, accountId: message.accountId,
+        providerConversationId: message.conversationId, providerMessageId: message.messageId,
+        phoneNumber,
+        ...(message.kind === "text" ? { text: message.text } : {
+          mediaId: message.audio.mediaId, ...(message.audio.mediaType ? { mediaType: message.audio.mediaType } : {}),
+        }) });
+      logProcessingEvent("info", { event: "Trainer message durably queued", eventId: message.eventId,
+        messageId: message.messageId, result: message.kind });
+      return Response.json({ received: true });
+    }
+  } catch (error) {
+    logProcessingEvent("error", { event: "Trainer routing failed", eventId: message.eventId,
+      messageId: message.messageId, error: error instanceof Error ? error.name : "UnknownError" });
+    return Response.json({ error: "Temporary ingestion failure" }, { status: 503 });
+  }
+
+  if (message.kind !== "text") {
+    console.info("Zernio webhook ignored", { reason: "non_trainer_audio" });
+    return Response.json({ received: true });
+  }
 
   const delaySeconds = adaptiveBatchDelaySeconds(message.text);
   try {
     const repository = new NeonConversationRepository();
     const inbound = await repository.recordInbound({
-      phoneNumber: normalizeBrazilianPhoneNumber(message.sender.phoneNumber ?? message.sender.id),
+      phoneNumber,
       providerMessageId: message.messageId,
       content: message.text,
       providerAccountId: message.accountId,

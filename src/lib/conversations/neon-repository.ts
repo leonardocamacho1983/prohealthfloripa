@@ -121,7 +121,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
     const rows = results[7] as IdentityRow[];
     const row = rows[0];
     if (!row) throw new Error("Failed to establish conversation identity");
-    return { inserted: inboundRows.length > 0, revision: Number(row.revision), conversationStatus: row.conversation_status,
+    return { inserted: inboundRows.length > 0, ...(inboundRows[0]?.id ? { messageId: inboundRows[0].id } : {}), revision: Number(row.revision), conversationStatus: row.conversation_status,
       ...(row.human_expires_at ? { humanExpiresAt: new Date(row.human_expires_at) } : {}), identity: {
       contactId: row.contact_id, conversationId: row.conversation_id,
       relationshipStatus: row.relationship_status, ...(row.first_name ? { firstName: row.first_name } : {}),

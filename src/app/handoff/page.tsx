@@ -127,6 +127,7 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
         <span className={styles.queueCount}>{conversations.length} {conversations.length === 1 ? "conversa" : "conversas"}</span>
         {canManage ? <nav className={styles.headerNav} aria-label="Administração"><a className={styles.logout} href="/metrics">Indicadores</a>
           <a className={styles.logout} href="/admin/users">Usuários</a>
+          <a className={styles.logout} href="/admin/training">Treinamentos</a>
           <AsyncActionForm action="/api/catalog/sync" buttonClassName={styles.logout}
             idleLabel="Atualizar catálogo" pendingLabel="Atualizando…" /></nav> : null}
         <SignOutButton redirectUrl="/sign-in"><button className={styles.logout} type="button">Sair</button></SignOutButton>

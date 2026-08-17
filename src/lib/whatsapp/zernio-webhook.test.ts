@@ -44,7 +44,8 @@ test("parses an incoming WhatsApp text message", () => {
 
   assert.equal(result.kind, "message");
   if (result.kind === "message") {
-    assert.equal(result.message.text, "Oi");
+    assert.equal(result.message.kind, "text");
+    if (result.message.kind === "text") assert.equal(result.message.text, "Oi");
     assert.equal(result.message.sender.phoneNumber, "+5548999999999");
     assert.equal(result.message.conversationId, "conversation-123");
     assert.equal(result.message.messageId, "wamid.123");
@@ -61,14 +62,24 @@ test("ignores outgoing messages to prevent reply loops", () => {
   });
 });
 
-test("ignores messages without text", () => {
+test("parses an incoming WhatsApp audio attachment", () => {
   const payload = structuredClone(validPayload);
   payload.message.text = "";
+  payload.message.attachments = [{ type: "audio", mimeType: "audio/ogg", payload: { id: "media-123" } }] as never;
 
-  assert.deepEqual(parseZernioWebhook(payload), {
-    kind: "ignored",
-    reason: "not_text",
-  });
+  const result = parseZernioWebhook(payload);
+  assert.equal(result.kind, "message");
+  if (result.kind === "message") {
+    assert.equal(result.message.kind, "audio");
+    if (result.message.kind === "audio") assert.equal(result.message.audio.mediaId, "media-123");
+  }
+});
+
+test("ignores unsupported attachments", () => {
+  const payload = structuredClone(validPayload);
+  payload.message.text = "";
+  payload.message.attachments = [{ type: "image", payload: { id: "media-123" } }] as never;
+  assert.deepEqual(parseZernioWebhook(payload), { kind: "ignored", reason: "unsupported_message_type" });
 });
 
 test("rejects malformed message payloads", () => {

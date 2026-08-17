@@ -50,6 +50,10 @@ Use Node.js 22 ou superior. Vincule `AI_GATEWAY_API_KEY`, conecte o banco Neon p
 
 As mensagens recebidas em sequência usam uma janela adaptativa: saudações podem ser acolhidas rapidamente, enquanto frases curtas ou incompletas aguardam mais tempo para reunir uma rajada. Cada mensagem nova reinicia essa janela. O Neon controla revisões, lease e idempotência; a Vercel Queue executa o turno com retry. Uma resposta calculada para uma revisão antiga é descartada antes do envio, inclusive durante a margem final anterior ao envio, e a revisão nova considera todos os pedidos acumulados. Em **Vercel → Project → Logs**, filtre por `/api/webhooks/zernio` para ingestão e `/api/queues/whatsapp-turn` para processamento. Os logs não incluem texto, telefone, payload ou credenciais.
 
+## Modo de treinamento
+
+Um administrador pode vincular uma conversa existente como treinador. A partir daí, textos e áudios desse contato são processados em uma fila isolada, sem consulta à Nextfit e sem alterar automaticamente o atendimento. Cada entrada vira uma proposta comentada. O comando exato `TREINAMENTO CONCLUÍDO` congela o lote e abre uma janela de revisão de até 8 horas. Áudios são baixados pela API autenticada da Zernio e transcritos pelo Vercel AI Gateway; nenhuma chave adicional é necessária.
+
 ## Contexto Nextfit
 
 A integração usa exclusivamente os endpoints `GET` oficiais:
