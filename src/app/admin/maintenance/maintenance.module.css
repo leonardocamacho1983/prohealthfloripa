@@ -1,0 +1,98 @@
+.shell {
+  min-height: 100vh;
+  background: #f5f7f5;
+  color: #183128;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 5vw;
+  background: #fff;
+  border-bottom: 1px solid #e3e8e4;
+}
+.header p,
+.eyebrow {
+  margin: 0;
+  color: #117a4b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.header h1,
+.card h2 {
+  margin: 4px 0 0;
+}
+.header nav {
+  display: flex;
+  gap: 18px;
+}
+.header a {
+  color: #35574a;
+  font-weight: 700;
+}
+.card {
+  max-width: 760px;
+  margin: 48px auto;
+  padding: 32px;
+  background: #fff;
+  border: 1px solid #e3e8e4;
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgb(24 49 40 / 7%);
+}
+.card > p:not(.eyebrow) {
+  color: #5b6f66;
+  line-height: 1.6;
+}
+.card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 28px 0;
+}
+.card dl div {
+  padding: 18px;
+  background: #f0f6f2;
+  border-radius: 12px;
+}
+.card dt {
+  color: #64746d;
+  font-size: 13px;
+}
+.card dd {
+  margin: 6px 0 0;
+  font-size: 30px;
+  font-weight: 800;
+}
+.card button {
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 16px;
+  background: #14794b;
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.success,
+.warning,
+.clear {
+  padding: 12px 14px;
+  border-radius: 10px;
+}
+.success,
+.clear {
+  background: #e9f6ee;
+  color: #126a43 !important;
+}
+.warning {
+  background: #fff2df;
+  color: #8a5413 !important;
+}
+@media (max-width: 700px) {
+  .header { align-items: flex-start; flex-direction: column; }
+  .card { margin: 20px 14px; padding: 22px; }
+  .card dl { grid-template-columns: 1fr; }
+}
