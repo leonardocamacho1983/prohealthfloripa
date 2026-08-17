@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 async function applyConversationRevisionRepair() {
   "use server";
-  await requireAppUser(["owner"]);
+  await requireAppUser(["owner", "admin"]);
   const result = await repairConversationRevisions();
   const outcome = result.queueFailures === 0 ? "success" : "partial";
   redirect(`/admin/maintenance?repair=${outcome}&messages=${result.affectedMessages}&conversations=${result.affectedConversations}&queued=${result.queuedTurns}`);
@@ -19,7 +19,7 @@ export default async function MaintenancePage({ searchParams }: {
   searchParams: Promise<{ repair?: string; messages?: string; conversations?: string; queued?: string }>;
 }) {
   try {
-    await requireAppUser(["owner"]);
+    await requireAppUser(["owner", "admin"]);
   } catch (error) {
     if (isAppAuthorizationError(error)) {
       if (error.status === 401) redirect("/sign-in");

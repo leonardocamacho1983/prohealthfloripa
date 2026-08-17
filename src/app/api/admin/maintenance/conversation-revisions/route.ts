@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 export async function GET() {
   try {
-    await requireAppUser(["owner"]);
+    await requireAppUser(["owner", "admin"]);
     return NextResponse.json({ ok: true, mode: "dry-run", ...(await previewConversationRevisionRepair()) });
   } catch (error) {
     if (isAppAuthorizationError(error)) {
@@ -20,7 +20,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAppUser(["owner"]);
+    await requireAppUser(["owner", "admin"]);
     const body = await request.json().catch(() => null) as { confirm?: unknown } | null;
     if (body?.confirm !== "repair-orphaned-inbound-revisions") {
       return NextResponse.json({ error: "Explicit repair confirmation is required" }, { status: 400 });
