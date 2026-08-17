@@ -4,7 +4,7 @@ import test from "node:test";
 import type { CustomerContext } from "../customer-context/index.ts";
 import type { HandoffStore } from "../handoff/types.ts";
 import type { WhatsAppProvider } from "../whatsapp/provider.ts";
-import { processConversationTurn } from "./process-conversation-turn.ts";
+import { EmptyTurnInvariantError, processConversationTurn } from "./process-conversation-turn.ts";
 import type { ConversationIdentity, ConversationMessage, ConversationTurnRepository,
   CustomerProfile, OutboundReservation, TurnAcquisition, TurnCompletionState } from "./types.ts";
 
@@ -17,6 +17,8 @@ class TurnRepository implements ConversationTurnRepository, HandoffStore {
   token?: string;
   sentKeys = new Set<string>();
   handoffRequested = false;
+  releasedState?: "failed" | "stale";
+  completedStates: TurnCompletionState[] = [];
 
   constructor(contents: string[]) {
     this.revision = contents.length;
@@ -52,9 +54,12 @@ class TurnRepository implements ConversationTurnRepository, HandoffStore {
   async markOutboundFailed() {}
   async completeTurn(input: { revision: number; token: string; state: TurnCompletionState }) {
     if (this.revision !== input.revision || this.token !== input.token || this.status !== "active") return false;
+    this.completedStates.push(input.state);
     this.processedRevision = input.revision; this.token = undefined; return true;
   }
-  async releaseTurn() { this.token = undefined; }
+  async releaseTurn(input: { state?: "failed" | "stale" }) {
+    this.releasedState = input.state; this.token = undefined;
+  }
   async getConversationState() { return { status: this.status }; }
   async requestHandoff() { this.handoffRequested = true; this.status = "human_requested"; this.processedRevision = this.revision; }
   async listHandoffs() { return []; }
@@ -109,6 +114,23 @@ test("complete cancellation before processing emits no reply", async () => {
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 2,
     repository, provider, generateReply: async () => { generated = true; return reply()(undefined as never); } });
   assert.equal(result, "suppressed"); assert.equal(generated, false); assert.equal(provider.sent.length, 0);
+  assert.deepEqual(repository.completedStates, ["suppressed"]);
+  assert.equal(repository.releasedState, undefined);
+});
+
+test("an acquired revision without messages fails closed and remains unprocessed", async () => {
+  const repository = new TurnRepository(["Mensagem persistida"]); const provider = new TurnProvider();
+  repository.messages = [];
+  await assert.rejects(
+    processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+      repository, provider, generateReply: reply() }),
+    (error) => error instanceof EmptyTurnInvariantError
+      && error.revision === 1 && error.processedRevision === 0,
+  );
+  assert.equal(repository.processedRevision, 0);
+  assert.equal(repository.releasedState, "failed");
+  assert.deepEqual(repository.completedStates, []);
+  assert.equal(provider.sent.length, 0);
 });
 
 test("corrections remain ordered in the consolidated turn", async () => {

@@ -3,11 +3,11 @@ import type { ConversationIdentity, ConversationMessage, ConversationRepository,
 import type { ConversationStatus } from "./types";
 import type { HandoffConversation, HandoffSource, HandoffStore, InboxConversation } from "../handoff/types";
 
-type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; conversation_status: ConversationStatus; human_expires_at: Date | null; inserted: boolean; revision: string | number };
+type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; conversation_status: ConversationStatus; human_expires_at: Date | null; revision: string | number };
 type ProfileRow = { customer_since: string | null; date_of_birth: string | null; financial_status: string | null; last_visit_at: Date | null; next_visit_at: Date | null; active_contracts: unknown | null; consumed_services_summary: unknown | null; attendance_metrics: unknown | null; relationship_metrics: unknown | null; synced_at: Date | null };
 
 let runtimeSchemaPromise: Promise<void> | undefined;
-function ensureRuntimeSchema(): Promise<void> {
+export function ensureConversationRuntimeSchema(): Promise<void> {
   if (!runtimeSchemaPromise) {
     const sql = getDatabase();
     runtimeSchemaPromise = sql.transaction((tx) => [
@@ -29,6 +29,18 @@ function ensureRuntimeSchema(): Promise<void> {
         ADD COLUMN IF NOT EXISTS delivery_status text NOT NULL DEFAULT 'sent',
         ADD COLUMN IF NOT EXISTS sent_at timestamptz,
         ADD COLUMN IF NOT EXISTS delivery_attempts integer NOT NULL DEFAULT 0`,
+      tx`DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname='messages_inbound_input_revision_required'
+              AND conrelid='messages'::regclass
+          ) THEN
+            ALTER TABLE messages ADD CONSTRAINT messages_inbound_input_revision_required
+              CHECK (direction <> 'inbound' OR input_revision IS NOT NULL) NOT VALID;
+          END IF;
+        END
+      $$`,
       tx`DROP INDEX IF EXISTS conversations_one_active_per_contact`,
       tx`CREATE UNIQUE INDEX IF NOT EXISTS conversations_one_open_per_contact ON conversations(contact_id)
         WHERE status IN ('active','human_requested','human_active')`,
@@ -54,55 +66,62 @@ function ensureRuntimeSchema(): Promise<void> {
   return runtimeSchemaPromise;
 }
 
+const ensureRuntimeSchema = ensureConversationRuntimeSchema;
+
 export class NeonConversationRepository implements ConversationRepository, ConversationTurnRepository, CustomerProfileStore, HandoffStore {
   async recordInbound(input: { phoneNumber: string; providerMessageId: string; content: string; providerAccountId?: string; providerConversationId?: string; settleAt?: Date }) {
     await ensureRuntimeSchema();
     const sql = getDatabase();
     const settleAt = input.settleAt ?? new Date();
-    await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
-      WHERE contact_id IN (SELECT id FROM contacts WHERE phone_number=${input.phoneNumber})
-        AND status='human_active' AND human_expires_at <= now()`;
-    const rows = await sql`
-      WITH contact AS (
-        INSERT INTO contacts (phone_number) VALUES (${input.phoneNumber})
+    // The advisory lock serializes the contact's inbound stream, including the first
+    // message that creates its open conversation. Each statement below runs in order
+    // in one transaction. The message receives its revision in the INSERT itself;
+    // PostgreSQL data-modifying CTEs must not be used to insert and then retag that row.
+    const results = await sql.transaction((tx) => [
+      tx`SELECT pg_advisory_xact_lock(hashtextextended(${input.phoneNumber}, 0))`,
+      tx`INSERT INTO contacts (phone_number) VALUES (${input.phoneNumber})
         ON CONFLICT (phone_number) DO UPDATE SET updated_at=now()
-        RETURNING id, first_name, relationship_status
-      ), existing_conversation AS (
-        SELECT id, contact_id, status, human_expires_at, inbound_revision FROM conversations
-        WHERE contact_id=(SELECT id FROM contact) AND status IN ('active','human_requested','human_active') LIMIT 1
-      ), inserted_conversation AS (
-        INSERT INTO conversations (contact_id)
-        SELECT id FROM contact WHERE NOT EXISTS (SELECT 1 FROM existing_conversation)
-        RETURNING id, contact_id, status, human_expires_at, inbound_revision
-      ), conversation AS (
-        SELECT * FROM existing_conversation UNION ALL SELECT * FROM inserted_conversation
-      ), inbound AS (
-        INSERT INTO messages (conversation_id, provider_message_id, direction, role, content)
-        SELECT id, ${input.providerMessageId}, 'inbound', 'user', ${input.content} FROM conversation
+        RETURNING id`,
+      tx`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
+        WHERE contact_id=(SELECT id FROM contacts WHERE phone_number=${input.phoneNumber})
+          AND status='human_active' AND human_expires_at <= now()`,
+      tx`INSERT INTO conversations (contact_id)
+        SELECT id FROM contacts WHERE phone_number=${input.phoneNumber}
+        ON CONFLICT (contact_id) WHERE status IN ('active','human_requested','human_active') DO NOTHING`,
+      tx`SELECT id FROM conversations
+        WHERE contact_id=(SELECT id FROM contacts WHERE phone_number=${input.phoneNumber})
+          AND status IN ('active','human_requested','human_active')
+        ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      tx`INSERT INTO messages (conversation_id, provider_message_id, direction, role, content, input_revision)
+        SELECT id, ${input.providerMessageId}, 'inbound', 'user', ${input.content}, inbound_revision + 1
+        FROM conversations
+        WHERE contact_id=(SELECT id FROM contacts WHERE phone_number=${input.phoneNumber})
+          AND status IN ('active','human_requested','human_active')
+        ORDER BY created_at DESC LIMIT 1
         ON CONFLICT (provider_message_id) WHERE provider_message_id IS NOT NULL DO NOTHING
-        RETURNING id, conversation_id
-      ), revisioned AS (
-        UPDATE conversations SET inbound_revision=inbound_revision + 1,
+        RETURNING id, conversation_id, input_revision`,
+      tx`UPDATE conversations c SET inbound_revision=m.input_revision,
           next_process_at=${settleAt}, processing_token=NULL, processing_revision=NULL,
           processing_lease_until=NULL, last_message_at=now(), updated_at=now(),
-          provider_account_id=COALESCE(${input.providerAccountId ?? null}, provider_account_id),
-          provider_conversation_id=COALESCE(${input.providerConversationId ?? null}, provider_conversation_id),
-          human_expires_at=CASE WHEN status='human_active' THEN now() + interval '12 hours' ELSE human_expires_at END
-        WHERE id IN (SELECT conversation_id FROM inbound)
-        RETURNING id, inbound_revision
-      ), tagged AS (
-        UPDATE messages SET input_revision=revisioned.inbound_revision
-        FROM inbound, revisioned WHERE messages.id=inbound.id AND revisioned.id=inbound.conversation_id
-      )
-      SELECT contact.id contact_id, conversation.id conversation_id, contact.first_name,
-             contact.relationship_status, conversation.status conversation_status,
-             conversation.human_expires_at, EXISTS(SELECT 1 FROM inbound) inserted,
-             COALESCE((SELECT inbound_revision FROM revisioned), conversation.inbound_revision) revision
-      FROM contact CROSS JOIN conversation
-    ` as IdentityRow[];
+          provider_account_id=COALESCE(${input.providerAccountId ?? null}, c.provider_account_id),
+          provider_conversation_id=COALESCE(${input.providerConversationId ?? null}, c.provider_conversation_id),
+          human_expires_at=CASE WHEN c.status='human_active' THEN now() + interval '12 hours' ELSE c.human_expires_at END
+        FROM messages m
+        WHERE m.provider_message_id=${input.providerMessageId} AND m.conversation_id=c.id
+          AND m.input_revision IS NOT NULL AND c.inbound_revision < m.input_revision
+        RETURNING c.id, c.inbound_revision`,
+      tx`SELECT ct.id contact_id, c.id conversation_id, ct.first_name, ct.relationship_status,
+          c.status conversation_status, c.human_expires_at, c.inbound_revision revision
+        FROM contacts ct JOIN conversations c ON c.contact_id=ct.id
+        WHERE ct.phone_number=${input.phoneNumber}
+          AND c.status IN ('active','human_requested','human_active')
+        ORDER BY c.created_at DESC LIMIT 1`,
+    ], { isolationLevel: "Serializable" });
+    const inboundRows = results[5] as Array<{ id: string; conversation_id: string; input_revision: string | number }>;
+    const rows = results[7] as IdentityRow[];
     const row = rows[0];
     if (!row) throw new Error("Failed to establish conversation identity");
-    return { inserted: row.inserted, revision: Number(row.revision), conversationStatus: row.conversation_status,
+    return { inserted: inboundRows.length > 0, revision: Number(row.revision), conversationStatus: row.conversation_status,
       ...(row.human_expires_at ? { humanExpiresAt: new Date(row.human_expires_at) } : {}), identity: {
       contactId: row.contact_id, conversationId: row.conversation_id,
       relationshipStatus: row.relationship_status, ...(row.first_name ? { firstName: row.first_name } : {}),

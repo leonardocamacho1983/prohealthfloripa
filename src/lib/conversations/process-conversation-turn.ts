@@ -16,6 +16,20 @@ export type TurnProcessingResult = "replied" | "suppressed" | "handoff_requested
 
 type EnrichCustomer = (input: { identity: ConversationIdentity; phoneNumber: string; message: string }) => Promise<ConversationIdentity>;
 
+export class EmptyTurnInvariantError extends Error {
+  readonly conversationId: string;
+  readonly revision: number;
+  readonly processedRevision: number;
+
+  constructor(input: { conversationId: string; revision: number; processedRevision: number }) {
+    super("An acquired conversation revision has no persisted inbound messages");
+    this.name = "EmptyTurnInvariantError";
+    this.conversationId = input.conversationId;
+    this.revision = input.revision;
+    this.processedRevision = input.processedRevision;
+  }
+}
+
 export async function processConversationTurn(input: {
   conversationId: string;
   observedRevision: number;
@@ -35,10 +49,15 @@ export async function processConversationTurn(input: {
   }
   const { turn } = acquisition;
   const plan = planConversationTurn(turn.messages);
-  if (!plan.messages.length || plan.suppressReply) {
+  if (!plan.messages.length) {
+    await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "failed" });
+    throw new EmptyTurnInvariantError({ conversationId: turn.conversationId,
+      revision: turn.revision, processedRevision: turn.processedRevision });
+  }
+  if (plan.suppressReply) {
     const completed = await input.repository.completeTurn({ conversationId: turn.conversationId,
       revision: turn.revision, token, state: "suppressed",
-      analysis: { inboundCount: plan.messages.length, suppressReply: true } });
+      analysis: { inboundCount: plan.messages.length, suppressReply: true, reason: "customer_cancelled" } });
     return completed ? "suppressed" : "stale";
   }
 

@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 
 import { generateWhatsAppReplyPlan } from "@/lib/ai/generate-whatsapp-reply";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
-import { processConversationTurn } from "@/lib/conversations/process-conversation-turn";
+import { EmptyTurnInvariantError, processConversationTurn } from "@/lib/conversations/process-conversation-turn";
 import { isRetryableTurnStateError, queueTurnRetryDirective,
   requireSettledQueueTurn } from "@/lib/conversations/queue-turn-retry";
 import type { WhatsAppTurnQueueMessage } from "@/lib/conversations/turn-queue";
 import { HANDOFF_ACKNOWLEDGEMENT } from "@/lib/handoff/detection";
 import { buildHandoffSummary } from "@/lib/handoff/summary";
+import { recordOperationalMetric } from "@/lib/metrics/repository";
 import { NextfitClient } from "@/lib/nextfit/client";
 import { createNextfitEnricher } from "@/lib/nextfit/sync-customer";
 import { enqueueInAppNotification } from "@/lib/notifications/repository";
@@ -62,6 +63,28 @@ async function escalatePermanentFailure(message: WhatsAppTurnQueueMessage, repos
     accountId: turn.accountId });
 }
 
+async function recordTurnFailure(error: unknown, message: WhatsAppTurnQueueMessage, deliveryCount: number) {
+  if (!(error instanceof EmptyTurnInvariantError)) return;
+  try {
+    await recordOperationalMetric({
+      eventName: "empty_turn_invariant",
+      outcome: "failure",
+      conversationId: error.conversationId,
+      metadata: {
+        revision: error.revision,
+        processedRevision: error.processedRevision,
+        observedRevision: message.observedRevision,
+        deliveryCount,
+      },
+      dedupeKey: `empty-turn-${error.conversationId}-${error.revision}-${deliveryCount}`,
+    });
+  } catch (metricError) {
+    console.warn("Turn failure metric could not be recorded", {
+      error: metricError instanceof Error ? metricError.name : "UnknownError",
+    });
+  }
+}
+
 export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, metadata) => {
   const apiKey = process.env.ZERNIO_API_KEY;
   if (!apiKey || !process.env.DATABASE_URL || !process.env.AI_GATEWAY_API_KEY) {
@@ -86,6 +109,7 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
         eventId: metadata.messageId, messageId: metadata.messageId, result: error.state });
       throw error;
     }
+    await recordTurnFailure(error, message, metadata.deliveryCount);
     logProcessingEvent("error", { event: "WhatsApp turn processing failed",
       eventId: metadata.messageId, messageId: metadata.messageId,
       error: error instanceof Error ? error.name : "UnknownError" });
