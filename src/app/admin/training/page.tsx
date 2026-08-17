@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { isAppAuthorizationError, requireAppUser } from "@/lib/handoff/server-auth";
 import { TrainingRepository } from "@/lib/training/repository";
+import { TrainingEnrollmentForm } from "./enrollment-form";
 import styles from "../maintenance/maintenance.module.css";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,7 @@ export default async function TrainingPage() {
       <div><p>ProHealth · conhecimento</p><h1>Treinamentos</h1></div>
       <nav><a href="/handoff">Atendimento</a><a href="/metrics">Indicadores</a></nav>
     </header>
+    <section className={styles.card}><TrainingEnrollmentForm /></section>
     {sessions.length === 0 ? <section className={styles.card}><h2>Nenhum treinamento</h2>
       <p>As propostas enviadas pelo treinador aparecerão aqui.</p></section>
       : sessions.map((session) => <section className={styles.card} key={session.id}>
