@@ -1,29 +1,52 @@
-import { generateText, jsonSchema, Output } from "ai";
+import { generateText, jsonSchema, Output, type ModelMessage } from "ai";
 
 import {
   customerContextForModel,
   type CustomerContext,
-} from "@/lib/customer-context";
-import { getNextfitCatalogContext } from "@/lib/catalog/nextfit-catalog";
-import { buildProHealthInstructions } from "@/lib/knowledge/prohealth-context";
-import { proHealthKnowledge } from "@/lib/knowledge/prohealth";
+} from "../customer-context/index.ts";
+import { getNextfitCatalogContext } from "../catalog/nextfit-catalog.ts";
+import type { ConversationMessage } from "../conversations/types.ts";
+import { buildProHealthInstructions } from "../knowledge/prohealth-context.ts";
+import { proHealthKnowledge } from "../knowledge/prohealth.ts";
 import {
   analyzeMassageRequest,
   buildConfirmedMassageAnswer,
   massageReplyContradictsConfirmedCatalog,
   missingConfirmedMassageMentions,
   type MassageRequestAnalysis,
-} from "@/lib/knowledge/massage-catalog-semantics";
-import { buildSchedulingInstructions } from "@/lib/nextfit/scheduling";
+} from "../knowledge/massage-catalog-semantics.ts";
+import { buildSchedulingInstructions } from "../nextfit/scheduling.ts";
 import {
   generateReplyPlanWithFallback,
   type WhatsAppReplyPlan,
-} from "./reply-generation-fallback";
+} from "./reply-generation-fallback.ts";
 import { ensureDeterministicReplyCoverage } from "./reply-coverage.ts";
 
-export type { WhatsAppReplyPlan } from "./reply-generation-fallback";
+export type { WhatsAppReplyPlan } from "./reply-generation-fallback.ts";
 
 const MODEL = "openai/gpt-5.4-mini";
+
+export function prepareWhatsAppModelMessages(input: {
+  recentMessages: readonly ConversationMessage[];
+  currentTurnMessageIds?: readonly string[];
+  currentTurn: string;
+}): { priorMessages: ConversationMessage[]; messages: ModelMessage[] } {
+  const currentIds = new Set(input.currentTurnMessageIds ?? []);
+  const implicitCurrentMessage = currentIds.size === 0
+    ? [...input.recentMessages].reverse().find((message) =>
+      message.role === "user" && message.content.trim() === input.currentTurn.trim())
+    : undefined;
+  const priorMessages = input.recentMessages.filter((message) =>
+    !currentIds.has(message.id) && message.id !== implicitCurrentMessage?.id);
+  const messages: ModelMessage[] = [];
+  for (const message of priorMessages) {
+    if (message.role === "user" || message.role === "assistant") {
+      messages.push({ role: message.role, content: message.content });
+    }
+  }
+  messages.push({ role: "user", content: input.currentTurn });
+  return { priorMessages, messages };
+}
 
 const replyPlanSchema = jsonSchema<WhatsAppReplyPlan>({
   type: "object",
@@ -38,7 +61,7 @@ const replyPlanSchema = jsonSchema<WhatsAppReplyPlan>({
   },
 });
 
-function buildGroundedMassageFallback(
+export function buildGroundedMassageFallback(
   analysis: MassageRequestAnalysis,
   message: string,
   options: { allowPartial: boolean },
@@ -53,12 +76,22 @@ function buildGroundedMassageFallback(
   const ordinaryDiscomfort = /\b(?:dor|dolorid|tens[aã]o|desconforto|travada)\w*/i.test(message)
     || /\b(?:cervical|pesco[cç]o|ombro|costas|lombar)\b.{0,24}\btravou\b|\btravou\b.{0,24}\b(?:cervical|pesco[cç]o|ombro|costas|lombar)\b/i.test(message);
   const commercialIntent = /\b(?:quero|queria|preciso|gostaria|agend|marc|hor[aá]rio|hoje|amanh[aã])\w*/i.test(message);
-  const sentences = [confirmed];
+  const greeting = /\bbom\s+dia\b/i.test(message)
+    ? "Bom dia!"
+    : /\bboa\s+tarde\b/i.test(message)
+      ? "Boa tarde!"
+      : /\bboa\s+noite\b/i.test(message)
+        ? "Boa noite!"
+        : /\b(?:oi|ol[aá])\b/i.test(message)
+          ? "Oi!"
+          : undefined;
+  const commercialParts = [...(greeting ? [greeting] : []), confirmed];
+  const followUpParts: string[] = [];
   if (ordinaryDiscomfort) {
-    sentences.push("Como você relatou dor ou desconforto, o profissional avalia no início se essa é a técnica mais adequada para você.");
+    followUpParts.push("Como você relatou dor ou desconforto, o profissional avalia no início se essa é a técnica mais adequada para você.");
   }
   if (commercialIntent) {
-    sentences.push(/\b(?:hoje|amanh[aã]|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)\b/i.test(message)
+    followUpParts.push(/\b(?:hoje|amanh[aã]|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)\b/i.test(message)
       ? "Você prefere atendimento de manhã, à tarde ou à noite?"
       : "Para qual dia e período você prefere o atendimento?");
   }
@@ -76,12 +109,13 @@ function buildGroundedMassageFallback(
   if (/\be-?mail\b/i.test(message)) {
     additionalAnswers.push(`Nosso e-mail é ${proHealthKnowledge.institutional.email}.`);
   }
+  commercialParts.push(...additionalAnswers);
   if (unresolvedTopic && options.allowPartial) {
-    additionalAnswers.push("Também recebi seu outro pedido e já o deixei para nossa equipe continuar por aqui, sem você precisar repetir.");
+    followUpParts.push("Também recebi seu outro pedido e já o deixei para nossa equipe continuar por aqui, sem você precisar repetir.");
   }
 
   return {
-    messages: [sentences.join(" "), ...(additionalAnswers.length ? [additionalAnswers.join(" ")] : [])],
+    messages: [commercialParts.join(" "), ...(followUpParts.length ? [followUpParts.join(" ")] : [])],
     answeredTopics: ["massagem_confirmada"],
     needsClarification: false,
     handoffRecommended: unresolvedTopic && options.allowPartial,
@@ -96,8 +130,11 @@ export async function generateWhatsAppReplyPlan(input: {
   currentTurnMessageIds?: readonly string[];
 }): Promise<WhatsAppReplyPlan> {
   const currentTurnMessageIds = new Set(input.currentTurnMessageIds ?? []);
-  const priorMessages = input.context.conversation.recentMessages
-    .filter((message) => !currentTurnMessageIds.has(message.id));
+  const { priorMessages, messages } = prepareWhatsAppModelMessages({
+    recentMessages: input.context.conversation.recentMessages,
+    currentTurnMessageIds: input.currentTurnMessageIds,
+    currentTurn: input.message,
+  });
   const catalogContext = await getNextfitCatalogContext();
   const schedulingInstructions = buildSchedulingInstructions(input.message);
   const latestAssistantReply = priorMessages
@@ -132,7 +169,7 @@ export async function generateWhatsAppReplyPlan(input: {
   const instructions = `${buildProHealthInstructions(`${relevantText}\n${input.message}`)}
 
 REGRAS DO TURNO ATUAL:
-- O cliente pode escrever em vários balões curtos. Trate as mensagens numeradas abaixo como um único turno, em ordem.
+- O cliente pode escrever em vários balões curtos. Trate as mensagens numeradas na mensagem do usuário como um único turno, em ordem.
 - Responda a todos os pedidos ainda válidos uma única vez, em no máximo 2 balões curtos.
 - Se houver saudação junto de um pedido, acolha em poucas palavras e já resolva o pedido no mesmo fluxo.
 - Se os assuntos forem diferentes, organize a resposta em parágrafos curtos; não repita uma introdução para cada assunto.
@@ -155,15 +192,8 @@ ${schedulingInstructions ?? ""}
 
 ${catalogContext ?? "CATÁLOGO NEXTFIT: cache ainda indisponível; use somente a base comercial confirmada acima."}
 
-TURNO CONSOLIDADO:
-${input.message}
-
 CONTEXTO NORMALIZADO (campos ausentes são desconhecidos; nunca invente; use dados pessoais apenas quando ajudarem; contractTotal é o valor total registrado do contrato e não deve ser descrito como último pagamento):
 ${customerContextForModel(input.context, new Date(), input.currentTurnMessageIds)}`;
-  const messages = priorMessages.map((message) => ({
-    role: message.role,
-    content: message.content,
-  }));
   const model = process.env.WHATSAPP_AI_MODEL ?? MODEL;
 
   let replyPlan: WhatsAppReplyPlan;

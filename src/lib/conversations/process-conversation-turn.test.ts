@@ -107,6 +107,26 @@ test("five rapid messages use one enrichment, one generation and one outbound se
   assert.match(consolidated, /Lomi-Lomi/); assert.match(consolidated, /Quanto custa/);
 });
 
+test("a stalled typing indicator never delays generation or the customer reply", async () => {
+  const repository = new TurnRepository(["Quero massagem relaxante"]);
+  const sent: string[] = [];
+  let typingSignal: AbortSignal | undefined;
+  const provider: WhatsAppProvider = {
+    async sendText(input) { sent.push(input.text); },
+    async sendTypingIndicator({ signal }) {
+      typingSignal = signal;
+      await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+    },
+  };
+
+  const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
+    repository, provider, generateReply: reply("A Relaxante custa R$ 270.") });
+
+  assert.equal(result, "replied");
+  assert.deepEqual(sent, ["A Relaxante custa R$ 270."]);
+  assert.equal(typingSignal?.aborted, true);
+});
+
 test("a greeting-only burst never invokes AI or revives an old topic", async () => {
   const repository = new TurnRepository(["Oi bom dia", "Tudo bem?"]);
   repository.messages.unshift({ id: "old-topic", conversationId: "conversation",

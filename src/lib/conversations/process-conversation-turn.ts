@@ -8,6 +8,7 @@ import { detectHandoffConsent, detectHandoffRequest, HANDOFF_ACKNOWLEDGEMENT,
 import { buildHandoffSummary } from "../handoff/summary.ts";
 import type { HandoffStore } from "../handoff/types.ts";
 import type { WhatsAppProvider } from "../whatsapp/provider.ts";
+import { startTypingPresence } from "../whatsapp/typing-presence.ts";
 import { needsNextfitEnrichment } from "../nextfit/sync-customer.ts";
 import { buildSocialReply } from "./social-message.ts";
 import { applyEpisodeBoundaryToHistory } from "./episode-boundary.ts";
@@ -138,13 +139,16 @@ export async function processConversationTurn(input: {
     return "handoff_requested";
   }
 
-  if (input.provider.sendTypingIndicator) {
-    try {
-      await input.provider.sendTypingIndicator({ accountId: turn.accountId, conversationId: turn.providerConversationId });
-    } catch (error) {
-      console.warn("WhatsApp typing indicator failed", { error: error instanceof Error ? error.name : "UnknownError" });
-    }
-  }
+  const typingPresence = startTypingPresence({
+    provider: input.provider,
+    accountId: turn.accountId,
+    conversationId: turn.providerConversationId,
+    onFailure: (error) => {
+      console.warn("WhatsApp typing indicator failed", {
+        error: error instanceof Error ? error.name : "UnknownError",
+      });
+    },
+  });
 
   try {
     let identity = turn.identity;
@@ -206,6 +210,7 @@ export async function processConversationTurn(input: {
     if ((input.preSendGraceMs ?? 0) > 0) {
       await new Promise((resolve) => setTimeout(resolve, input.preSendGraceMs));
     }
+    typingPresence.stop();
     for (const [bubbleIndex, text] of messages.entries()) {
       const idempotencyKey = `zernio-turn-${turn.conversationId}-${turn.revision}-${bubbleIndex}`;
       const reservation = await input.repository.reserveOutbound({ conversationId: turn.conversationId,
@@ -259,6 +264,7 @@ export async function processConversationTurn(input: {
         episodeBoundary: episode.boundary.startsNewEpisode ? episode.boundary.reason : null }, responsePlan });
     return completed ? "replied" : "stale";
   } catch (error) {
+    typingPresence.stop();
     await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "failed" });
     throw error;
   }

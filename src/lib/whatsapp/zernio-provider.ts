@@ -14,14 +14,19 @@ export class ZernioWhatsAppProvider implements WhatsAppProvider {
     this.fetcher = fetcher;
   }
 
-  async sendTypingIndicator({ accountId, conversationId }: { accountId: string; conversationId: string }): Promise<void> {
+  async sendTypingIndicator({ accountId, conversationId, signal }: {
+    accountId: string;
+    conversationId: string;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const timeoutSignal = AbortSignal.timeout(2_000);
     const response = await this.fetcher(
       `${ZERNIO_API_BASE_URL}/v1/inbox/conversations/${encodeURIComponent(conversationId)}/typing`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ accountId }),
-        signal: AbortSignal.timeout(3_500),
+        signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
       },
     );
     if (!response.ok) throw new Error(`Zernio typing indicator failed with HTTP ${response.status}`);
