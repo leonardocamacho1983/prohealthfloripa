@@ -75,6 +75,18 @@ export class TrainingRepository {
     return rows[0];
   }
 
+  async deactivateConversation(conversationId: string): Promise<boolean> {
+    await ensureTrainingSchema(); const sql = getDatabase();
+    const rows = await sql`UPDATE training_profiles tp SET active=false, updated_at=now()
+      FROM conversations c
+      WHERE c.id=${conversationId}
+        AND tp.contact_id=c.contact_id
+        AND tp.provider_account_id=c.provider_account_id
+        AND tp.active=true
+      RETURNING tp.id` as Array<{ id: string }>;
+    return rows.length > 0;
+  }
+
   async addItem(input: TrainingItemInput): Promise<{ sequence: number; inserted: boolean }> {
     await ensureTrainingSchema(); const sql = getDatabase();
     const results = await sql.transaction((tx) => [

@@ -26,7 +26,7 @@ const scenarios = [
   },
   {
     question: "Quanto custa massagem Thai?",
-    expected: ["Thai e Ayurvédica pertencem à categoria especial", "R$ 300"],
+    expected: ["Thai/Thai Yoga e Ayurvédica são técnicas diferentes", "R$ 300"],
   },
   {
     question: "Qual a diferença entre tradicional e especial?",
@@ -96,7 +96,7 @@ test("removes the obsolete claim that prices are unavailable", () => {
 
 const massageScenarios = [
   ["Quanto custa massagem desportiva?", ["Desportiva", "tradicional/clássica", "R$ 270"]],
-  ["Thai é tradicional ou especial?", ["Thai e Ayurvédica pertencem à categoria especial", "R$ 300"]],
+  ["Thai é tradicional ou especial?", ["Thai/Thai Yoga e Ayurvédica são técnicas diferentes", "R$ 300"]],
   ["Quanto custa Lomi-Lomi?", ["Lomi-Lomi", "tradicional/clássica", "R$ 270"]],
   ["Quanto custa Abhyanga?", ["Abhyanga (1h)", "Valor avulso especial: R$ 300"]],
   ["Qual a duração do Shirodhara?", ["Shirodhara (50 min)", "categoria especial"]],
@@ -115,3 +115,71 @@ for (const [question, expected] of massageScenarios) {
     assert.doesNotMatch(instructions, /classificação.+precisa ser confirmada/i);
   });
 }
+
+const knowledgeUpdateScenarios = [
+  ["Quem é o responsável técnico e quem atende?", [
+    "Maciel Henrique Lopes, fisioterapeuta do esporte",
+    "Massagens tradicionais: Ângela, Cátia Preto, Juliana",
+  ]],
+  ["Como é a avaliação de Pilates?", [
+    "avaliação cinético-funcional",
+    "avaliação postural dinâmica",
+    "avaliação postural estática",
+  ]],
+  ["Vocês fazem avaliação inicial?", [
+    "AVALIAÇÃO INICIAL",
+    "Pilates pode incluir",
+    "Termoterapias e contraste",
+  ]],
+  ["Estou grávida, posso fazer contraste?", [
+    "Protocolo interno PRO HEALTH",
+    "doenças cardíacas; gestação",
+    "não um diagnóstico médico universal",
+  ]],
+  ["Como funciona o Pilates Performance?", [
+    "TRX, elásticos, wall ball",
+    "demandas e aos gestos técnicos do esporte",
+    "Não prometer prevenção de lesões",
+  ]],
+  ["A banheira quente aumenta hipertrofia?", [
+    "recovery, conforto e relaxamento",
+    "não atribuir hipertrofia ou síntese muscular ao calor",
+  ]],
+  ["A crioterapia acelera a recuperação muscular?", [
+    "reduzir a sensação de dor muscular tardia",
+    "Evidências sobre inflamação, força, performance e velocidade de reparação são inconsistentes",
+  ]],
+  ["Como funciona a massagem Thai?", [
+    "técnicas diferentes",
+    "pressões, mobilizações e alongamentos",
+  ]],
+  ["Como funciona o retorno ao esporte?", [
+    "forma progressiva e individualizada",
+    "Nem todo cliente necessariamente percorre todas as etapas",
+  ]],
+  ["Vocês têm fontes científicas sobre Pilates?", [
+    "10.3390/ijerph20042850",
+    "não citar DOI em respostas normais de WhatsApp",
+  ]],
+  ["Como é o ambiente e o espaço?", [
+    "cabines individualizadas",
+    "Evitar a expressão \"espaço de cura\"",
+  ]],
+] as const;
+
+for (const [question, expected] of knowledgeUpdateScenarios) {
+  test(`includes safe updated knowledge for: ${question}`, () => {
+    const instructions = buildProHealthInstructions(question);
+    for (const value of expected) {
+      assert.ok(instructions.includes(value), `Expected instructions to include: ${value}`);
+    }
+  });
+}
+
+test("uses Joao's confirmed monthly recovery recurrence", () => {
+  const instructions = buildProHealthInstructions("Quanto custa o plano recorrente de termoterapias?");
+  assert.match(instructions, /R\$ 350 por mês/);
+  assert.match(instructions, /2 sessões por semana/);
+  assert.match(instructions, /8 sessões no mês/);
+  assert.doesNotMatch(instructions, /6x R\$ 350/);
+});

@@ -15,3 +15,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "Enrollment failed" }, { status: 500 });
   }
 }
+
+export async function DELETE(request: Request) {
+  try {
+    await requireAppUser(["owner", "admin"]);
+    const body = await request.json() as { conversationId?: unknown };
+    if (typeof body.conversationId !== "string") return Response.json({ error: "Invalid conversation" }, { status: 400 });
+    const deactivated = await new TrainingRepository().deactivateConversation(body.conversationId);
+    return Response.json({ deactivated });
+  } catch (error) {
+    if (isAppAuthorizationError(error)) return Response.json({ error: "Unauthorized" }, { status: error.status });
+    console.error("Trainer deactivation failed", { error: error instanceof Error ? error.name : "UnknownError" });
+    return Response.json({ error: "Deactivation failed" }, { status: 500 });
+  }
+}
