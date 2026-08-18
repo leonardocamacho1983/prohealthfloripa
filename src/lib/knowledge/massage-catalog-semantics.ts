@@ -114,10 +114,16 @@ const TECHNIQUES: readonly TechniqueDefinition[] = [
     aliases: [exact("tuiná")],
   },
   {
-    canonicalName: "Ayurvédica / Thai",
+    canonicalName: "Ayurvédica",
     category: "special",
     duration: "1h",
-    aliases: [exact("ayurvédica / thai"), exact("ayurvédica"), exact("thai")],
+    aliases: [exact("ayurvédica")],
+  },
+  {
+    canonicalName: "Thai / Thai Yoga",
+    category: "special",
+    duration: "1h",
+    aliases: [exact("thai yoga"), exact("thai")],
   },
   {
     canonicalName: "Shiro Abhyanga",

@@ -74,7 +74,7 @@ test("extracts multiple confirmed services from a message burst in order", () =>
   ]);
   assert.deepEqual(
     analysis.mentions.map((mention) => mention.canonicalName),
-    ["Lomi-Lomi", "Ayurvédica / Thai", "Abhyanga", "Shirodhara"],
+    ["Lomi-Lomi", "Thai / Thai Yoga", "Abhyanga", "Shirodhara"],
   );
   assert.deepEqual(
     analysis.mentions.map((mention) => mention.singlePrice),
@@ -84,13 +84,21 @@ test("extracts multiple confirmed services from a message burst in order", () =>
 
 test("keeps the confirmed duration and category for special techniques", () => {
   const thai = analyzeMassageRequest("Thai é tradicional ou especial?").mentions[0];
-  assert.equal(thai?.canonicalName, "Ayurvédica / Thai");
+  assert.equal(thai?.canonicalName, "Thai / Thai Yoga");
   assert.equal(thai?.categoryLabel, "especial");
   assert.equal(thai?.duration, "1h");
 
   const shirodhara = analyzeMassageRequest("Quanto tempo dura Shirodhara?").mentions[0];
   assert.equal(shirodhara?.categoryLabel, "especial");
   assert.equal(shirodhara?.duration, "50 min");
+});
+
+test("keeps Ayurvédica and Thai as distinct confirmed techniques", () => {
+  const analysis = analyzeMassageRequest("Compare Ayurvédica e Thai Yoga");
+  assert.deepEqual(
+    analysis.mentions.map((mention) => mention.canonicalName),
+    ["Ayurvédica", "Thai / Thai Yoga"],
+  );
 });
 
 test("marks an unknown massage technique for clarification without grounding it as fact", () => {
