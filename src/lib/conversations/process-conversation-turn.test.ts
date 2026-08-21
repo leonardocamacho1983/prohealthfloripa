@@ -356,6 +356,68 @@ test("a greeting-only burst never invokes AI or revives an old topic", async () 
   assert.equal(repository.profileReads, 0);
 });
 
+test("the new agent owns a social and substantive burst without automatic closure", async () => {
+  const repository = new TurnRepository([
+    "Tudo bem tbm obrigado.",
+    "Eu queria saber sobre liberação miofascial",
+  ]);
+  const provider = new TurnProvider();
+  let generated = 0;
+  let receivedMessage = "";
+
+  const result = await processConversationTurn({
+    conversationId: "conversation",
+    observedRevision: 2,
+    repository,
+    provider,
+    agentOwnsConversation: true,
+    journeyMode: "off",
+    semanticPlannerMode: "off",
+    generateReply: async (input) => {
+      generated += 1;
+      receivedMessage = input.message;
+      return {
+        messages: ["A Miofascial é uma massagem direcionada a regiões de tensão. O atendimento dura uma hora e custa R$ 270."],
+        answeredTopics: ["miofascial"],
+        needsClarification: false,
+        handoffRecommended: false,
+      };
+    },
+  });
+
+  assert.equal(result, "replied");
+  assert.equal(generated, 1);
+  assert.match(receivedMessage, /obrigado[\s\S]*liberação miofascial/i);
+  assert.equal(provider.sent.length, 1);
+  assert.doesNotMatch(provider.sent[0] ?? "", /encerrar/i);
+});
+
+test("the new agent receives a greeting-only turn instead of a canned social reply", async () => {
+  const repository = new TurnRepository(["Oi bom dia!", "tudo bem?"]);
+  const provider = new TurnProvider();
+  let generated = false;
+
+  await processConversationTurn({
+    conversationId: "conversation",
+    observedRevision: 2,
+    repository,
+    provider,
+    agentOwnsConversation: true,
+    journeyMode: "off",
+    semanticPlannerMode: "off",
+    generateReply: async () => {
+      generated = true;
+      return {
+        messages: ["Oi, bom dia! Tudo bem por aqui 😊 Como posso te ajudar?"],
+        answeredTopics: ["greeting"], needsClarification: true, handoffRecommended: false,
+      };
+    },
+  });
+
+  assert.equal(generated, true);
+  assert.deepEqual(provider.sent, ["Oi, bom dia! Tudo bem por aqui 😊 Como posso te ajudar?"]);
+});
+
 test("a greeting after inactivity starts an episode that excludes the old symptom", async () => {
   const repository = new TurnRepository(["Oi bom dia", "Quero massagem de liberação", "Dor no ombro"]);
   repository.messages.unshift(

@@ -30,6 +30,7 @@ Crie um `.env.local` a partir do `.env.example` e preencha localmente:
 - `CRON_SECRET`: segredo forte usado pela Vercel para autenticar as rotinas de catálogo e início de turno.
 - `JOURNEY_ENGINE_MODE`: opcional; aceita `off`, `shadow` ou `active`. Sem valor explícito, previews e desenvolvimento usam `active`, enquanto produção usa `shadow` para observar a nova jornada sem alterar a resposta enviada.
 - `SEMANTIC_PLANNER_MODE`: opcional; aceita `off`, `shadow` ou `active`. Em `shadow`, registra o plano sem alterar a precedência atual; em `active`, o plano semântico e o gerador natural respondem antes dos templates da jornada. O padrão é `active` em Preview/desenvolvimento e `shadow` em produção.
+- `PROHEALTH_AGENT_MODE`: aceita `off` ou `active`. Sem valor explícito, fica ativo somente em Preview e desligado em produção. Quando ativo, o `ToolLoopAgent` assume a conversa e desliga jornada, planejador e respostas sociais determinísticas.
 
 ## Verificação
 

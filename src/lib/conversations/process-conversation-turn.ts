@@ -295,6 +295,7 @@ export async function processConversationTurn(input: {
   preSendGraceMs?: number;
   journeyMode?: JourneyEngineMode;
   semanticPlannerMode?: SemanticPlannerMode;
+  agentOwnsConversation?: boolean;
   observeJourney?: (observation: JourneyTurnObservation) => Promise<void> | void;
 }): Promise<TurnProcessingResult> {
   const processingStartedAt = Date.now();
@@ -313,6 +314,7 @@ export async function processConversationTurn(input: {
   }
   const { turn } = acquisition;
   const plan = planConversationTurn(turn.messages);
+  const socialKind = input.agentOwnsConversation ? undefined : plan.socialKind;
   if (!plan.messages.length) {
     await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "failed" });
     throw new EmptyTurnInvariantError({ conversationId: turn.conversationId,
@@ -328,7 +330,7 @@ export async function processConversationTurn(input: {
   const rawTurnText = plan.messages.map((message) => message.content).join(" ");
   // Start this independent read before any optional Nextfit enrichment and
   // reuse it in the scheduling fast path and the ordinary journey planner.
-  const journeyStatePromise = plan.socialKind
+  const journeyStatePromise = socialKind
     ? Promise.resolve(undefined)
     : loadJourneyState(journeyRepository, turn.conversationId);
   let earlyShadowObservation: {
@@ -338,7 +340,7 @@ export async function processConversationTurn(input: {
   } | undefined;
   let handoff = detectHandoffRequest(rawTurnText);
   let handoffHistory: ConversationMessage[] | undefined;
-  if (!handoff && isExplicitSchedulingAuthorization(rawTurnText)) {
+  if (!input.agentOwnsConversation && !handoff && isExplicitSchedulingAuthorization(rawTurnText)) {
     const schedulingHistory = await input.repository.getRecentMessages(turn.conversationId, 20);
     const currentIds = new Set(plan.messages.map((message) => message.id));
     const schedulingEpisode = applyEpisodeBoundaryToHistory({
@@ -400,7 +402,7 @@ export async function processConversationTurn(input: {
       }
     }
   }
-  if (!handoff && isPossibleHandoffConsent(rawTurnText)) {
+  if (!input.agentOwnsConversation && !handoff && isPossibleHandoffConsent(rawTurnText)) {
     handoffHistory = await input.repository.getRecentMessages(turn.conversationId, 12);
     const currentIds = new Set(plan.messages.map((message) => message.id));
     const immediatelyPrevious = handoffHistory
@@ -495,7 +497,7 @@ export async function processConversationTurn(input: {
     let identity = turn.identity;
     let semanticInterpretation: SemanticTurnInterpretation | undefined;
     let previousUserMessage: string | undefined;
-    if (input.enrichCustomer && !plan.socialKind && !plan.resetRequested
+    if (input.enrichCustomer && !socialKind && !plan.resetRequested
       && !needsNextfitEnrichment(rawTurnText)
       && isPossiblePersonalAccountFollowUp(rawTurnText)) {
       const currentIds = new Set(plan.messages.map((message) => message.id));
@@ -508,7 +510,7 @@ export async function processConversationTurn(input: {
         previousUserMessage = previous.content;
       }
     }
-    if (input.enrichCustomer && !plan.socialKind
+    if (input.enrichCustomer && !socialKind
       && (needsNextfitEnrichment(rawTurnText, previousUserMessage)
         || (identity.relationshipStatus === "unknown"
           && extractJourneyGoals(rawTurnText).length > 0))) {
@@ -520,7 +522,7 @@ export async function processConversationTurn(input: {
       }
     }
     const [baseContext, persistedJourneyState] = await Promise.all([
-      plan.socialKind
+      socialKind
         ? Promise.resolve<CustomerContext>({
           identity: {
             relationshipStatus: identity.relationshipStatus,
@@ -545,7 +547,7 @@ export async function processConversationTurn(input: {
       .filter((message) => message.role === "assistant");
     const priorAssistantMessages = priorAssistantMessageRecords.map((message) => message.content);
     const previousMessage = activeMessages.filter((message) => !currentIds.has(message.id)).at(-1);
-    const closureConsent = previousMessage?.role === "assistant"
+    const closureConsent = !input.agentOwnsConversation && previousMessage?.role === "assistant"
       && isClosureConsent(rawTurnText, previousMessage.content);
     let generationFailed = false;
     let responsePlan: WhatsAppReplyPlan | undefined;
@@ -559,7 +561,7 @@ export async function processConversationTurn(input: {
     let semanticPlan: SemanticTurnPlan | undefined;
     let semanticPlanIssues: string[] = [];
 
-    if (!plan.socialKind && input.planSemanticTurn && resolvedSemanticPlannerMode !== "off") {
+    if (!socialKind && input.planSemanticTurn && resolvedSemanticPlannerMode !== "off") {
       try {
         semanticPlan = await input.planSemanticTurn({
           currentTurn: plan.consolidatedMessage,
@@ -575,7 +577,7 @@ export async function processConversationTurn(input: {
     }
     const semanticPlannerControlsReply = resolvedSemanticPlannerMode === "active" && Boolean(semanticPlan);
 
-    if (journeyRepository && !plan.socialKind) {
+    if (journeyRepository && !socialKind) {
       const planningStartedAt = Date.now();
       const priorUserMessages = activeMessages
         .filter((message) => message.role === "user" && !currentIds.has(message.id))
@@ -694,9 +696,9 @@ export async function processConversationTurn(input: {
       responsePlan = { messages: [AUTOMATIC_CLOSURE_CONFIRMATION],
         answeredTopics: ["closure_consent"], needsClarification: false, handoffRecommended: false };
       replySource = "social";
-    } else if (plan.socialKind) {
-      responsePlan = { messages: [buildSocialReply(plan.socialKind, context.identity.firstName, plan.greeting)],
-        answeredTopics: [plan.socialKind], needsClarification: false, handoffRecommended: false };
+    } else if (socialKind) {
+      responsePlan = { messages: [buildSocialReply(socialKind, context.identity.firstName, plan.greeting)],
+        answeredTopics: [socialKind], needsClarification: false, handoffRecommended: false };
       replySource = "social";
     } else if (!responsePlan) {
       try {
@@ -762,7 +764,7 @@ export async function processConversationTurn(input: {
       }
     }
     if (!responsePlan) throw new Error("Missing response plan");
-    if (!plan.socialKind && plan.greeting
+    if (!socialKind && !input.agentOwnsConversation && plan.greeting
       && !hasAssistantGreetingAcknowledgement(priorAssistantMessages)) {
       responsePlan = {
         ...responsePlan,
@@ -822,7 +824,7 @@ export async function processConversationTurn(input: {
       inboundCount: plan.messages.length,
       repairRequested: plan.repairRequested,
       resetRequested: plan.resetRequested,
-      socialKind: plan.socialKind ?? null,
+      socialKind: socialKind ?? null,
       semanticInterpretation: semanticInterpretation ? {
         intent: semanticInterpretation.intent,
         goals: semanticInterpretation.goals,

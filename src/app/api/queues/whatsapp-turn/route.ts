@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 
 import { generateWhatsAppReplyPlan } from "@/lib/ai/generate-whatsapp-reply";
 import { hasAiGatewayCredential } from "@/lib/ai/gateway-auth";
+import { proHealthAgentMode } from "@/lib/ai/prohealth-agent-mode";
+import { generateProHealthAgentReplyPlan } from "@/lib/ai/prohealth-whatsapp-agent";
 import { interpretSemanticTurn } from "@/lib/ai/semantic-turn-interpreter";
 import { planSemanticTurn } from "@/lib/ai/semantic-turn-planner";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
@@ -132,11 +134,18 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
   }
   try {
     const nextfitApiKey = process.env.NEXTFIT_API_KEY;
+    const agentActive = proHealthAgentMode() === "active";
     const result = requireSettledQueueTurn(await processConversationTurn({ conversationId: message.conversationId,
       observedRevision: message.observedRevision, repository, provider,
-      generateReply: generateWhatsAppReplyPlan,
-      interpretTurn: interpretSemanticTurn,
-      planSemanticTurn,
+      generateReply: agentActive ? generateProHealthAgentReplyPlan : generateWhatsAppReplyPlan,
+      ...(agentActive ? {
+        agentOwnsConversation: true,
+        journeyMode: "off" as const,
+        semanticPlannerMode: "off" as const,
+      } : {
+        interpretTurn: interpretSemanticTurn,
+        planSemanticTurn,
+      }),
       preSendGraceMs: 300,
       observeJourney: recordJourneyTurn,
       ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey),
