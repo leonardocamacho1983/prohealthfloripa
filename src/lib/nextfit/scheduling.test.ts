@@ -44,6 +44,15 @@ test("an exact hour is more specific than a broad period", () => {
   assert.equal(intent.hasPeriodPreference, true);
 });
 
+test("recognizes common Brazilian hour shorthand", () => {
+  for (const message of ["Amanhã às 10hs", "amanhã 10h", "amanhã 10:00"]) {
+    const intent = detectSchedulingIntent(message);
+    assert.equal(intent.hasDayPreference, true, message);
+    assert.equal(intent.hasExactTimePreference, true, message);
+    assert.equal(intent.hasPeriodPreference, true, message);
+  }
+});
+
 test("consolidates service and exact time across consecutive customer turns", () => {
   const instructions = buildSchedulingInstructions(
     "amanhã às 14?",

@@ -25,7 +25,7 @@ import { scheduleCxSurveyBestEffort } from "@/lib/cx/surveys";
 import { ensurePromiseSchema } from "@/lib/promises/repository";
 import { ensureNotificationDeliverySchema } from "@/lib/notifications/delivery-schema";
 
-type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; conversation_status: ConversationStatus; human_expires_at: Date | null; revision: string | number };
+type IdentityRow = { contact_id: string; conversation_id: string; first_name: string | null; relationship_status: RelationshipStatus; conversation_status: ConversationStatus; human_expires_at: Date | null; revision: string | number; next_process_at: Date | null };
 type ProfileRow = { customer_since: string | null; date_of_birth: string | null; financial_status: string | null; last_visit_at: Date | null; next_visit_at: Date | null; active_contracts: unknown | null; consumed_services_summary: unknown | null; attendance_metrics: unknown | null; relationship_metrics: unknown | null; synced_at: Date | null };
 
 let runtimeSchemaPromise: Promise<void> | undefined;
@@ -41,6 +41,7 @@ export function ensureConversationRuntimeSchema(): Promise<void> {
         ADD COLUMN IF NOT EXISTS inbound_revision bigint NOT NULL DEFAULT 0,
         ADD COLUMN IF NOT EXISTS processed_revision bigint NOT NULL DEFAULT 0,
         ADD COLUMN IF NOT EXISTS next_process_at timestamptz,
+        ADD COLUMN IF NOT EXISTS batch_started_at timestamptz,
         ADD COLUMN IF NOT EXISTS processing_token text,
         ADD COLUMN IF NOT EXISTS processing_revision bigint,
         ADD COLUMN IF NOT EXISTS processing_lease_until timestamptz`,
@@ -160,7 +161,12 @@ export class NeonConversationRepository implements ConversationRepository, Conve
           AND c.awaiting_customer_since IS NOT NULL
         ON CONFLICT (idempotency_key) DO NOTHING`,
       tx`UPDATE conversations c SET inbound_revision=m.input_revision,
-          next_process_at=${settleAt}, processing_token=NULL, processing_revision=NULL,
+          batch_started_at=CASE WHEN c.processed_revision >= c.inbound_revision
+            THEN now() ELSE COALESCE(c.batch_started_at, now()) END,
+          next_process_at=LEAST(${settleAt},
+            CASE WHEN c.processed_revision >= c.inbound_revision
+              THEN now() ELSE COALESCE(c.batch_started_at, now()) END + interval '8 seconds'),
+          processing_token=NULL, processing_revision=NULL,
           processing_lease_until=NULL, last_message_at=now(), updated_at=now(),
           provider_account_id=COALESCE(${input.providerAccountId ?? null}, c.provider_account_id),
           provider_conversation_id=COALESCE(${input.providerConversationId ?? null}, c.provider_conversation_id),
@@ -174,7 +180,8 @@ export class NeonConversationRepository implements ConversationRepository, Conve
           AND m.input_revision IS NOT NULL AND c.inbound_revision < m.input_revision
         RETURNING c.id, c.inbound_revision`,
       tx`SELECT ct.id contact_id, c.id conversation_id, ct.first_name, ct.relationship_status,
-          c.status conversation_status, c.human_expires_at, c.inbound_revision revision
+          c.status conversation_status, c.human_expires_at, c.inbound_revision revision,
+          c.next_process_at
         FROM contacts ct JOIN conversations c ON c.contact_id=ct.id
         WHERE ct.phone_number=${input.phoneNumber}
           AND c.status IN ('active','human_requested','human_active')
@@ -199,6 +206,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
       await linkReopenedOutcome(reopenedRows[0].previous_conversation_id, reopenedRows[0].conversation_id);
     }
     return { inserted: inboundRows.length > 0, ...(inboundRows[0]?.id ? { messageId: inboundRows[0].id } : {}), revision: Number(row.revision), conversationStatus: row.conversation_status,
+      processAt: row.next_process_at ? new Date(row.next_process_at) : settleAt,
       ...(row.human_expires_at ? { humanExpiresAt: new Date(row.human_expires_at) } : {}), identity: {
       contactId: row.contact_id, conversationId: row.conversation_id,
       relationshipStatus: row.relationship_status, ...(row.first_name ? { firstName: row.first_name } : {}),
@@ -725,7 +733,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
     const sql = getDatabase();
     const rows = await sql`UPDATE conversations SET processed_revision=${input.revision},
       processing_token=NULL, processing_revision=NULL, processing_lease_until=NULL,
-      next_process_at=NULL, updated_at=now()
+      next_process_at=NULL, batch_started_at=NULL, updated_at=now()
       WHERE id=${input.conversationId} AND status='active' AND inbound_revision=${input.revision}
         AND processing_revision=${input.revision} AND processing_token=${input.token}
       RETURNING id` as Array<{ id: string }>;

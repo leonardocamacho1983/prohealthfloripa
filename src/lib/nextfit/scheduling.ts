@@ -1,9 +1,9 @@
 const SCHEDULING_ACTION = /\b(?:agend(?:ar|amento|a|e|o)|marc(?:ar|a[cç][aã]o)|reserv(?:ar|a|e)|disponibilidade|vaga)\w*/i;
 const SLOT_TERM = /\bhor[aá]rio\w*/i;
 const SERVICE = /\b(?:massag|pilates|fisio|recovery|termoterapia|crioterapia|banheira|drenagem|shiatsu|lomi|thai|ayurv[eé]dica|libera[cç][aã]o|miofascial|miofacial)\w*/i;
-const DAY_PREFERENCE = /\b(?:hoje|amanh[aã]|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|\d{1,2}(?:\/\d{1,2})?)\b/i;
+const DAY_PREFERENCE = /(?:^|[^\p{L}\p{N}_])(?:hoje|amanh[aã]|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|\d{1,2}(?:\/\d{1,2})?)(?=$|[^\p{L}\p{N}_])/iu;
 const PERIOD_PREFERENCE = /\b(?:manh[aã]|tarde|noite)\b/i;
-const EXACT_TIME_PREFERENCE = /\b(?:[01]?\d|2[0-3])(?:h(?:[0-5]\d)?|:[0-5]\d)\b|(?:^|\s)(?:às?|as?)\s*(?:[01]?\d|2[0-3])(?=\s|[?!.,]|$)/iu;
+const EXACT_TIME_PREFERENCE = /\b(?:[01]?\d|2[0-3])(?:h(?:[0-5]\d)?|hs|:[0-5]\d)\b|(?:^|\s)(?:às?|as?)\s*(?:[01]?\d|2[0-3])(?=\s|[?!.,]|$)/iu;
 const EXPLICIT_SCHEDULING_AUTHORIZATION = /^(?:ok\s+)?(?:sim,?\s*)?(?:pode|quero|vamos)\s+(?:agendar|marcar|reservar)(?:\s+(?:sim|por\s+favor))?[.!?\s]*$/i;
 
 export type SchedulingIntent = {

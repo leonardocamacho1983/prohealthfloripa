@@ -90,6 +90,7 @@ test("uses a short adaptive quiet window for greetings, actions and complete que
   assert.equal(adaptiveBatchDelaySeconds("Pode agendar"), 2);
   assert.equal(adaptiveBatchDelaySeconds("amanhã"), 2);
   assert.equal(adaptiveBatchDelaySeconds("15:30"), 2);
+  assert.equal(adaptiveBatchDelaySeconds("10hs"), 2);
   assert.equal(adaptiveBatchDelaySeconds("Qual é o endereço?"), 2);
   assert.equal(adaptiveBatchDelaySeconds("Ah também"), 4);
   assert.equal(adaptiveBatchDelaySeconds("Dor na cervical e no ombro direito"), 3);

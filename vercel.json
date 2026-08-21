@@ -5,7 +5,7 @@
       "experimentalTriggers": [
         {
           "type": "queue/v2beta",
-          "topic": "prohealth-whatsapp-turns",
+          "topic": "prohealth-whatsapp-turns-v2",
           "retryAfterSeconds": 15,
           "initialDelaySeconds": 0
         }

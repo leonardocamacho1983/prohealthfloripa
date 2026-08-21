@@ -17,7 +17,7 @@ const RESET = /\b(?:(?:vamos|quero|pode|podemos)\s+)?(?:come[cç]ar|recome[cç]a
 const CONTRADICTION_REPAIR = /\b(?:u[eé]+(?=\W|$)|mas\s+(?:voc[eê]|vc|o\s+agente)\s+(?:disse|falou|informou)|n[aã]o\s+entendi|(?:voc[eê]|vc)\s+(?:se\s+)?contradisse|isso\s+n[aã]o\s+faz\s+sentido)/i;
 const CONTINUATION_ENDING = /\b(?:e|tamb[eé]m|ah|pera|ali[aá]s|porque|que|sobre|com|pra|para)$/i;
 const EXPLICIT_ACTION = /^(?:(?:sim|ok|pode|quero|vamos)(?:,|\s)+)*(?:pode\s+)?(?:agendar|marcar|confirmar|encaminhar)(?:\s+(?:isso|pra\s+mim|para\s+mim))?[.!]?$/i;
-const SCHEDULING_DETAIL = /^(?:hoje|amanh[aã]|depois\s+de\s+amanh[aã]|(?:segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(?:-feira)?|(?:[0-2]?\d)(?::[0-5]\d|h(?:[0-5]\d)?)|(?:de\s+)?(?:manh[aã]|tarde|noite))[.!]?$/i;
+const SCHEDULING_DETAIL = /^(?:hoje|amanh[aã]|depois\s+de\s+amanh[aã]|(?:segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(?:-feira)?|(?:[0-2]?\d)(?::[0-5]\d|h(?:[0-5]\d)?|hs)|(?:de\s+)?(?:manh[aã]|tarde|noite))[.!]?$/i;
 
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();

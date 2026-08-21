@@ -159,8 +159,10 @@ export async function POST(request: Request) {
     const queuedForAgent = resumedPendingHandoff
       || (inbound.conversationStatus !== "human_requested" && inbound.conversationStatus !== "human_active");
     if (queuedForAgent) {
+      const persistedDelaySeconds = Math.max(0,
+        Math.ceil((inbound.processAt.getTime() - Date.now()) / 1000));
       await enqueueWhatsAppTurn({ conversationId: inbound.identity.conversationId,
-        observedRevision: inbound.revision }, delaySeconds);
+        observedRevision: inbound.revision }, persistedDelaySeconds);
       if (inbound.inserted) {
         after(async () => {
           try {

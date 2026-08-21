@@ -1,6 +1,8 @@
 import { send } from "@vercel/queue";
 
-export const WHATSAPP_TURN_TOPIC = "prohealth-whatsapp-turns";
+// A versioned topic prevents callbacks retained by a previous deployment from
+// competing with the current worker against the same conversation state.
+export const WHATSAPP_TURN_TOPIC = "prohealth-whatsapp-turns-v2";
 
 export type WhatsAppTurnQueueMessage = {
   conversationId: string;
