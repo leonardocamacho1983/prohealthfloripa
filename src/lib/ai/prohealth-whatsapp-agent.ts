@@ -2,6 +2,7 @@ import { isStepCount, jsonSchema, Output, tool, ToolLoopAgent } from "ai";
 
 import { getNextfitCatalogContextForMessage } from "../catalog/nextfit-catalog.ts";
 import { customerContextForModel, type CustomerContext } from "../customer-context/index.ts";
+import { HANDOFF_ACKNOWLEDGEMENT } from "../handoff/detection.ts";
 import { buildProHealthInstructions } from "../knowledge/prohealth-context.ts";
 import type { WhatsAppReplyPlan } from "./reply-generation-fallback.ts";
 import { gatewayProviderOptions, whatsappModelRouting } from "./gateway-routing.ts";
@@ -147,7 +148,10 @@ REGRA FINAL DE PRIORIDADE
     abortSignal: AbortSignal.timeout(12_000),
   });
   const output = result.output;
-  const replyMessages = compactMessages(output.messages);
+  const operationalHandoff = Boolean(output.operationalAction?.customerAuthorized);
+  const replyMessages = operationalHandoff
+    ? [HANDOFF_ACKNOWLEDGEMENT]
+    : compactMessages(output.messages);
   if (!replyMessages.length) throw new Error("ProHealth agent returned no usable message");
   const previousAssistantMessages = input.context.conversation.recentMessages
     .filter((message) => message.role === "assistant")
@@ -170,8 +174,8 @@ REGRA FINAL DE PRIORIDADE
   return {
     ...output,
     messages: replyMessages,
-    handoffRecommended: Boolean(output.operationalAction?.customerAuthorized),
-    handoffValidated: Boolean(output.operationalAction?.customerAuthorized),
+    handoffRecommended: operationalHandoff,
+    handoffValidated: operationalHandoff,
     generationMode: "structured",
   };
 }

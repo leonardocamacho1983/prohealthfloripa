@@ -402,7 +402,7 @@ export async function processConversationTurn(input: {
       }
     }
   }
-  if (!input.agentOwnsConversation && !handoff && isPossibleHandoffConsent(rawTurnText)) {
+  if (!handoff && isPossibleHandoffConsent(rawTurnText)) {
     handoffHistory = await input.repository.getRecentMessages(turn.conversationId, 12);
     const currentIds = new Set(plan.messages.map((message) => message.id));
     const immediatelyPrevious = handoffHistory

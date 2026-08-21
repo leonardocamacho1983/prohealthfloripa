@@ -56,4 +56,4 @@ export function detectHandoffConsent(
   return { reason: "Cliente confirmou o encaminhamento oferecido pela agente.", source: "customer" };
 }
 
-export const HANDOFF_ACKNOWLEDGEMENT = "Claro. Já avisei nossa equipe. A Bia continuará esta conversa por aqui assim que possível.";
+export const HANDOFF_ACKNOWLEDGEMENT = "Boa! Estou passando sua conversa para nosso atendimento humano, que dará continuidade por aqui dentro do nosso horário de atendimento: de segunda a sexta, das 14h às 20h.";

@@ -555,11 +555,13 @@ test("a short acceptance after an assistant offer opens handoff without invoking
   const provider = new TurnProvider();
   let generated = false;
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
-    repository, provider, generateReply: async () => { generated = true; return reply()(); } });
+    repository, provider, agentOwnsConversation: true,
+    generateReply: async () => { generated = true; return reply()(); } });
   assert.equal(result, "handoff_requested");
   assert.equal(repository.handoffRequested, true);
   assert.equal(generated, false);
-  assert.match(provider.sent[0] ?? "", /Bia continuar[aá]/i);
+  assert.match(provider.sent[0] ?? "", /atendimento humano/i);
+  assert.match(provider.sent[0] ?? "", /segunda a sexta, das 14h às 20h/i);
 });
 
 test("an explicit scheduling authorization uses service, day and exact hour from prior turns", async () => {
@@ -583,7 +585,7 @@ test("an explicit scheduling authorization uses service, day and exact hour from
   assert.equal(result, "handoff_requested");
   assert.equal(repository.handoffRequested, true);
   assert.equal(generated, false);
-  assert.match(provider.sent[0] ?? "", /Bia continuar[aá]/i);
+  assert.match(provider.sent[0] ?? "", /atendimento humano/i);
 });
 
 test("a short acceptance cannot revive an old or non-adjacent handoff offer", async () => {
@@ -723,7 +725,7 @@ test("a structured schedule request opens handoff only after explicit authorizat
 
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
     repository, provider, generateReply: async () => ({
-      messages: ["Perfeito. A equipe vai verificar a agenda de amanhã às 14h e confirmar por aqui."],
+      messages: ["Boa! Estou passando sua conversa para nosso atendimento humano, que dará continuidade por aqui dentro do nosso horário de atendimento: de segunda a sexta, das 14h às 20h."],
       answeredTopics: ["agendamento"],
       needsClarification: false,
       handoffRecommended: true,
@@ -1439,7 +1441,7 @@ test("shadow mode evaluates explicit scheduling authorization before preserving 
   });
 
   assert.equal(result, "handoff_requested");
-  assert.match(provider.sent[0] ?? "", /Bia continuar/i);
+  assert.match(provider.sent[0] ?? "", /atendimento humano/i);
   assert.deepEqual(observations, [{
     candidateAction: "schedule_handoff",
     replySource: "legacy_handoff",

@@ -114,6 +114,8 @@ test("human request acknowledges once and opens a handoff", async () => {
     text: "Quero falar com uma pessoa", repository: fixture.repository, provider: fixture.provider,
     generateReply: async () => "should not run" });
   assert.equal(result, "handoff_requested"); assert.equal(fixture.wasRequested(), true); assert.equal(fixture.sent.length, 1);
+  assert.match(fixture.sent[0] ?? "", /atendimento humano/i);
+  assert.match(fixture.sent[0] ?? "", /segunda a sexta, das 14h às 20h/i);
 });
 
 test("agent stays silent while a human handoff is active", async () => {
