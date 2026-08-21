@@ -4,7 +4,7 @@ import {
   customerContextForModel,
   type CustomerContext,
 } from "../customer-context/index.ts";
-import { getNextfitCatalogContext } from "../catalog/nextfit-catalog.ts";
+import { getNextfitCatalogContextForMessage } from "../catalog/nextfit-catalog.ts";
 import type { ConversationMessage } from "../conversations/types.ts";
 import { buildProHealthInstructions } from "../knowledge/prohealth-context.ts";
 import { proHealthKnowledge } from "../knowledge/prohealth.ts";
@@ -20,11 +20,25 @@ import {
   generateReplyPlanWithFallback,
   type WhatsAppReplyPlan,
 } from "./reply-generation-fallback.ts";
+import { gatewayProviderOptions, whatsappModelRouting } from "./gateway-routing.ts";
 import { ensureDeterministicReplyCoverage } from "./reply-coverage.ts";
 
 export type { WhatsAppReplyPlan } from "./reply-generation-fallback.ts";
 
-const MODEL = "openai/gpt-5.4-mini";
+async function loadPublishedKnowledgeInstructions(): Promise<string> {
+  try {
+    const { getActiveKnowledgeInstructions } = await import("../knowledge/governance.ts");
+    return await getActiveKnowledgeInstructions();
+  } catch {
+    // The embedded, reviewed knowledge remains the safe runtime fallback.
+    return "";
+  }
+}
+
+export const WHATSAPP_GENERATION_TIMEOUTS_MS = {
+  structured: 7_000,
+  plainText: 3_000,
+} as const;
 
 export function prepareWhatsAppModelMessages(input: {
   recentMessages: readonly ConversationMessage[];
@@ -135,8 +149,7 @@ export async function generateWhatsAppReplyPlan(input: {
     currentTurnMessageIds: input.currentTurnMessageIds,
     currentTurn: input.message,
   });
-  const catalogContext = await getNextfitCatalogContext();
-  const schedulingInstructions = buildSchedulingInstructions(input.message);
+  const catalogContext = await getNextfitCatalogContextForMessage(input.message);
   const latestAssistantReply = priorMessages
     .filter((message) => message.role === "assistant").at(-1)?.content;
   const previousAssistantMessages = priorMessages
@@ -166,7 +179,17 @@ export async function generateWhatsAppReplyPlan(input: {
     .filter((message) => message.role === "user")
     .map((message) => message.content)
     .join("\n");
+  const schedulingInstructions = buildSchedulingInstructions(
+    input.message,
+    process.env.NEXTFIT_BOOKING_URL,
+    priorMessages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content),
+  );
+  const activeKnowledgeInstructions = await loadPublishedKnowledgeInstructions();
   const instructions = `${buildProHealthInstructions(`${relevantText}\n${input.message}`)}
+
+${activeKnowledgeInstructions}
 
 REGRAS DO TURNO ATUAL:
 - O cliente pode escrever em vários balões curtos. Trate as mensagens numeradas na mensagem do usuário como um único turno, em ordem.
@@ -182,6 +205,12 @@ REGRAS DO TURNO ATUAL:
 - Não mencione processamento, fila, modelo, sistema ou demora interna.
 - Nunca direcione a pessoa ao mesmo número de WhatsApp em que ela já está conversando.
 - Prefira uma próxima ação concreta. Faça no máximo uma pergunta objetiva por resposta.
+- Entregue a orientação pedida imediatamente. Não use "se quiser", "posso te explicar" nem peça permissão para passar opções.
+- Se o cliente já negou dor forte, formigamento, perda de força ou trauma, não repita essa triagem.
+- Ao recomendar, cite no máximo duas opções reais e explique em uma frase a diferença prática entre elas; evite listas vagas de modalidades.
+- Mencione que o profissional ajusta a abordagem no máximo uma vez por conversa, salvo se o cliente perguntar sobre segurança ou avaliação.
+- Nunca pergunte se a pessoa quer o endereço. Quando for útil para um visitante, informe diretamente o endereço confirmado no contexto.
+- Depois de uma resposta curta como "sim" ou "quero sim", cumpra a pergunta ou promessa imediatamente usando a última fala do agente como contexto.
 ${repairRequested ? "- Houve sinal de reparo: reconheça o erro em uma frase, corrija o fato confirmado e avance; não defenda a resposta anterior." : ""}
 
 ${massageAnalysis.grounding ?? ""}
@@ -190,11 +219,21 @@ ${latestAssistantReply ? `ÚLTIMA RESPOSTA JÁ ENVIADA — NÃO REPETIR SEM NECE
 
 ${schedulingInstructions ?? ""}
 
-${catalogContext ?? "CATÁLOGO NEXTFIT: cache ainda indisponível; use somente a base comercial confirmada acima."}
+${catalogContext ?? "CATÁLOGO NEXTFIT: cache ainda indisponível; use somente a base confirmada acima."}
 
 CONTEXTO NORMALIZADO (campos ausentes são desconhecidos; nunca invente; use dados pessoais apenas quando ajudarem; contractTotal é o valor total registrado do contrato e não deve ser descrito como último pagamento):
 ${customerContextForModel(input.context, new Date(), input.currentTurnMessageIds)}`;
-  const model = process.env.WHATSAPP_AI_MODEL ?? MODEL;
+  const routing = whatsappModelRouting();
+  const model = routing.model;
+  const providerOptions = gatewayProviderOptions({
+    fallbackModels: routing.fallbackModels,
+    feature: "whatsapp-reply",
+  });
+  const plainTextModel = routing.fallbackModels[0] ?? model;
+  const plainTextProviderOptions = gatewayProviderOptions({
+    fallbackModels: routing.fallbackModels.slice(1),
+    feature: "whatsapp-reply-fallback",
+  });
 
   let replyPlan: WhatsAppReplyPlan;
   try {
@@ -206,8 +245,9 @@ ${customerContextForModel(input.context, new Date(), input.currentTurnMessageIds
           instructions,
           messages,
           maxOutputTokens: 350,
-          maxRetries: 1,
-          abortSignal: AbortSignal.timeout(16_000),
+          maxRetries: 0,
+          providerOptions,
+          abortSignal: AbortSignal.timeout(WHATSAPP_GENERATION_TIMEOUTS_MS.structured),
         });
         const output = result.output;
         const replyMessages = output.messages.map((message) => message.trim()).filter(Boolean).slice(0, 2);
@@ -225,7 +265,7 @@ ${customerContextForModel(input.context, new Date(), input.currentTurnMessageIds
       ),
       generatePlainText: async () => {
         const result = await generateText({
-          model,
+          model: plainTextModel,
           instructions: `${instructions}
 
 MODO DE CONTINGÊNCIA:
@@ -236,7 +276,8 @@ MODO DE CONTINGÊNCIA:
           messages,
           maxOutputTokens: 260,
           maxRetries: 0,
-          abortSignal: AbortSignal.timeout(10_000),
+          providerOptions: plainTextProviderOptions,
+          abortSignal: AbortSignal.timeout(WHATSAPP_GENERATION_TIMEOUTS_MS.plainText),
         });
         return result.text;
       },

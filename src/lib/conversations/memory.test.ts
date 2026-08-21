@@ -134,6 +134,15 @@ test("confirmed massage aliases replace an older open intent", () => {
   }
 });
 
+test("banheira and contraste keep recovery as the active intent", () => {
+  for (const [index, content] of ["Quero conhecer a banheira", "E como funciona o contraste?"].entries()) {
+    const current: ConversationMessage = { id: `recovery-${index}`, conversationId: "conversation",
+      direction: "inbound", role: "user", content,
+      createdAt: new Date(`2026-08-17T11:00:0${index}.000Z`) };
+    assert.equal(detectOpenIntent([current]), "recovery", content);
+  }
+});
+
 test("database failure stops before sending a reply", async () => {
   const repository = new MemoryRepository(); const provider = new MemoryProvider();
   repository.recordInbound = async () => { throw new Error("database unavailable"); };
@@ -151,7 +160,7 @@ test("social messages skip enrichment and AI generation", async () => {
     generateReply: async () => { generated = true; return "AI"; } });
   assert.equal(enriched, false);
   assert.equal(generated, false);
-  assert.equal(provider.sent[0], "De nada 🙂 Se precisar, é só me chamar.");
+  assert.equal(provider.sent[0], "De nada 🙂 Posso encerrar este atendimento por aqui?");
 });
 
 test("safe logs omit phone, message content, tokens, and API keys", () => {

@@ -20,12 +20,66 @@
           "initialDelaySeconds": 0
         }
       ]
+    },
+    "src/app/api/queues/conversation-inactivity/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "prohealth-conversation-inactivity",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "src/app/api/queues/notifier/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "prohealth-notifier",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "src/app/api/queues/sla/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "prohealth-sla-deadlines",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "src/app/api/queues/promises/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "prohealth-promise-deadlines",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
+    },
+    "src/app/api/queues/cx-survey/route.ts": {
+      "experimentalTriggers": [
+        {
+          "type": "queue/v2beta",
+          "topic": "prohealth-cx-survey",
+          "retryAfterSeconds": 30,
+          "initialDelaySeconds": 0
+        }
+      ]
     }
   },
   "crons": [
     {
       "path": "/api/catalog/sync",
       "schedule": "15 3 * * *"
+    },
+    {
+      "path": "/api/cron/shift-digest",
+      "schedule": "0 11 * * *"
     }
   ]
 }

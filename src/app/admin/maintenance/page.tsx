@@ -16,7 +16,7 @@ async function applyConversationRevisionRepair() {
 }
 
 export default async function MaintenancePage({ searchParams }: {
-  searchParams: Promise<{ repair?: string; messages?: string; conversations?: string; queued?: string }>;
+  searchParams: Promise<{ repair?: string; messages?: string; conversations?: string; queued?: string; schema?: string }>;
 }) {
   try {
     await requireAppUser(["owner", "admin"]);
@@ -51,6 +51,15 @@ export default async function MaintenancePage({ searchParams }: {
           <button type="submit">Reparar e reenfileirar</button>
         </form>
         : <p className={styles.clear}>Nenhuma mensagem pendente de reparo.</p>}
+    </section>
+    <section className={styles.card}>
+      <p className={styles.eyebrow}>Banco de dados</p><h2>Schema operacional da plataforma</h2>
+      <p>Aplica de forma idempotente as estruturas aditivas de workflow, notificação, SLA, CX, conhecimento, avaliações e workforce.</p>
+      {params.schema && params.schema !== "error" ? <p className={styles.success}>Schema validado na versão {params.schema}.</p> : null}
+      {params.schema === "error" ? <p className={styles.warning}>A validação falhou. Consulte os logs seguros antes de tentar novamente.</p> : null}
+      <form action="/api/admin/maintenance/platform-schema" method="post">
+        <button type="submit">Validar e aplicar schema</button>
+      </form>
     </section>
   </main>;
 }

@@ -228,6 +228,46 @@
   font-size: 14px;
 }
 
+.pendingInvite {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid #edf1ee;
+}
+
+.pendingInvite strong,
+.pendingInvite small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.pendingInvite small {
+  margin-top: 3px;
+  color: #6b7972;
+}
+
+.inviteActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.inviteActions a,
+.inviteActions button {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #edf5f0;
+  color: #126a43;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+}
+
 .pending small {
   color: #6b7972;
 }

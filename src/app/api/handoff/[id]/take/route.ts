@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
 import { recordAuditEvent } from "@/lib/audit";
-import { isAppAuthorizationError, requireAppUser } from "@/lib/handoff/server-auth";
+import { appUserLabel, isAppAuthorizationError, requireAppPermission } from "@/lib/handoff/server-auth";
 import { resolveHandoffNotificationsBestEffort } from "@/lib/notifications/repository";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   let actor;
   try {
-    actor = await requireAppUser();
+    actor = await requireAppPermission("handoff:assume");
   } catch (error) {
     if (!isAppAuthorizationError(error)) throw error;
     await recordAuditEvent({ actorUserId: error.userId, actorRole: error.role,
@@ -17,15 +17,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return new NextResponse(error.message, { status: error.status });
   }
   try {
-    await new NeonConversationRepository().takeHandoff(id);
+    await new NeonConversationRepository().takeHandoff(id, {
+      userId: actor.userId, label: appUserLabel(actor),
+    });
     await resolveHandoffNotificationsBestEffort(id, "taken");
     await recordAuditEvent({ actorUserId: actor.userId, actorRole: actor.role,
       action: "handoff.take", resourceType: "conversation", resourceId: id, outcome: "success" });
   } catch (error) {
     await recordAuditEvent({ actorUserId: actor.userId, actorRole: actor.role,
       action: "handoff.take", resourceType: "conversation", resourceId: id,
-      outcome: "failure", metadata: { errorType: error instanceof Error ? error.name : "UnknownError" } });
-    throw error;
+      outcome: "failure", metadata: { errorType: error instanceof Error ? error.name : "UnknownError", statusCode: 409 } });
+    return new NextResponse("Conversation is assigned to another attendant", { status: 409 });
   }
   return NextResponse.redirect(new URL(`/handoff?conversation=${id}`, request.url), 303);
 }

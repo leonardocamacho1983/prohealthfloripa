@@ -75,11 +75,16 @@ test("parses an incoming WhatsApp audio attachment", () => {
   }
 });
 
-test("ignores unsupported attachments", () => {
+test("parses unsupported attachments so the customer never receives silence", () => {
   const payload = structuredClone(validPayload);
   payload.message.text = "";
   payload.message.attachments = [{ type: "image", payload: { id: "media-123" } }] as never;
-  assert.deepEqual(parseZernioWebhook(payload), { kind: "ignored", reason: "unsupported_message_type" });
+  const parsed = parseZernioWebhook(payload);
+  assert.equal(parsed.kind, "message");
+  if (parsed.kind === "message") {
+    assert.equal(parsed.message.kind, "media");
+    if (parsed.message.kind === "media") assert.equal(parsed.message.media.category, "image");
+  }
 });
 
 test("rejects malformed message payloads", () => {

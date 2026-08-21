@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildSocialReply, classifySocialMessage, isGreetingMessage } from "./social-message.ts";
+import { AUTOMATIC_CLOSURE_CONFIRMATION, buildSocialReply, classifySocialMessage, detectGreetingContext,
+  hasAssistantGreetingAcknowledgement, isGreetingMessage,
+  isClosureConsent, prependGreetingAcknowledgement } from "./social-message.ts";
 
 test("recognizes greeting questions without intercepting a request", () => {
   for (const message of ["Oi bom dia", "Tudo bem?", "Olá, boa tarde!", "oi, tudo bem?"]) {
@@ -9,7 +11,32 @@ test("recognizes greeting questions without intercepting a request", () => {
     assert.equal(classifySocialMessage(message), "greeting", message);
   }
   assert.equal(classifySocialMessage("Oi, qual é o endereço?"), undefined);
-  assert.equal(buildSocialReply("greeting", "Leonardo"), "Oi, Leonardo! Tudo bem? Como posso ajudar?");
+  assert.equal(buildSocialReply("greeting", "Leonardo", { daypart: "afternoon" }),
+    "Oi, Leonardo, boa tarde! Tudo ótimo por aqui 😊 E com você? Como podemos te ajudar hoje?");
+});
+
+test("acknowledges a greeting naturally when it arrives with a substantive request", () => {
+  assert.deepEqual(detectGreetingContext("Oi, boa tarde! Estou com dor na lombar"), {
+    daypart: "afternoon",
+  });
+  assert.equal(
+    prependGreetingAcknowledgement("Para essa queixa, podemos orientar.", { daypart: "afternoon" }),
+    "Oi, boa tarde! Tudo ótimo por aqui 😊 Para essa queixa, podemos orientar.",
+  );
+  assert.equal(
+    prependGreetingAcknowledgement("Oi! Já vou te ajudar.", { daypart: "afternoon" }),
+    "Oi! Já vou te ajudar.",
+  );
+  assert.equal(detectGreetingContext("Como vai funcionar a massagem?"), undefined);
+});
+
+test("recognizes that the assistant already greeted in the current episode", () => {
+  assert.equal(hasAssistantGreetingAcknowledgement([
+    "Oi, Leonardo, boa noite! Tudo ótimo por aqui 😊 E com você? Como podemos te ajudar hoje?",
+  ]), true);
+  assert.equal(hasAssistantGreetingAcknowledgement([
+    "Para essa tensão, temos duas opções de massagem.",
+  ]), false);
 });
 
 test("recognizes gratitude and common typing errors", () => {
@@ -34,6 +61,13 @@ test("recognizes short acknowledgements and farewells", () => {
   assert.equal(classifySocialMessage("até mais"), "farewell");
 });
 
-test("builds a short personalized response", () => {
-  assert.equal(buildSocialReply("gratitude", "Leonardo"), "De nada, Leonardo 🙂 Se precisar, é só me chamar.");
+test("asks permission before closing a satisfied conversation", () => {
+  assert.equal(classifySocialMessage("Estou satisfeito, era isso"), "satisfaction");
+  assert.equal(classifySocialMessage("Não estou satisfeito"), undefined);
+  assert.equal(buildSocialReply("gratitude", "Leonardo"),
+    "De nada, Leonardo 🙂 Posso encerrar este atendimento por aqui?");
+  assert.equal(isClosureConsent("sim, pode encerrar",
+    "Que bom 🙂 Posso encerrar este atendimento por aqui?"), true);
+  assert.equal(isClosureConsent("sim, pode encerrar", "Como posso ajudar?"), false);
+  assert.match(AUTOMATIC_CLOSURE_CONFIRMATION, /Vou encerrar/);
 });

@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
   },
+  images: {
+    qualities: [75, 80, 82, 84, 86, 88],
+  },
 };
 
 export default nextConfig;

@@ -2,8 +2,14 @@ import { handleCallback } from "@vercel/queue";
 import { randomUUID } from "node:crypto";
 
 import { generateWhatsAppReplyPlan } from "@/lib/ai/generate-whatsapp-reply";
+import { hasAiGatewayCredential } from "@/lib/ai/gateway-auth";
+import { interpretSemanticTurn } from "@/lib/ai/semantic-turn-interpreter";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
-import { EmptyTurnInvariantError, processConversationTurn } from "@/lib/conversations/process-conversation-turn";
+import {
+  EmptyTurnInvariantError,
+  processConversationTurn,
+  type JourneyTurnObservation,
+} from "@/lib/conversations/process-conversation-turn";
 import { isRetryableTurnStateError, queueTurnRetryDirective,
   requireSettledQueueTurn } from "@/lib/conversations/queue-turn-retry";
 import type { WhatsAppTurnQueueMessage } from "@/lib/conversations/turn-queue";
@@ -12,33 +18,12 @@ import { buildHandoffSummary } from "@/lib/handoff/summary";
 import { recordOperationalMetric } from "@/lib/metrics/repository";
 import { NextfitClient } from "@/lib/nextfit/client";
 import { createNextfitEnricher } from "@/lib/nextfit/sync-customer";
-import { enqueueInAppNotification } from "@/lib/notifications/repository";
-import { buildHandoffRequestedNotification } from "@/lib/notifications/rules";
+import { handoffNotifier, sendShiftStartDigests } from "@/lib/notifications/handoff-delivery";
 import { logProcessingEvent } from "@/lib/observability/safe-log";
 import { ZernioWhatsAppProvider } from "@/lib/whatsapp/zernio-provider";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-function notification(provider: ZernioWhatsAppProvider) {
-  return async (input: { conversationId: string; firstName?: string; reason: string; summary: string;
-    idempotencyKey: string; accountId: string }) => {
-    await enqueueInAppNotification(buildHandoffRequestedNotification({
-      conversationId: input.conversationId,
-      firstName: input.firstName,
-      dedupeKey: input.idempotencyKey,
-    }));
-    if (!process.env.HANDOFF_ATTENDANT_PHONE || !process.env.ZERNIO_HANDOFF_TEMPLATE_NAME) return;
-    const baseUrl = process.env.APP_URL ?? "https://prohealthfloripa.vercel.app";
-    await provider.sendTemplate({ accountId: input.accountId,
-      participantId: process.env.HANDOFF_ATTENDANT_PHONE!,
-      templateName: process.env.ZERNIO_HANDOFF_TEMPLATE_NAME!,
-      templateLanguage: process.env.ZERNIO_HANDOFF_TEMPLATE_LANGUAGE ?? "pt_BR",
-      templateParams: [input.firstName ?? "Cliente", input.reason, input.summary,
-        `${baseUrl}/handoff?conversation=${input.conversationId}`],
-      idempotencyKey: input.idempotencyKey });
-  };
-}
 
 async function escalatePermanentFailure(message: WhatsAppTurnQueueMessage, repository: NeonConversationRepository,
   provider: ZernioWhatsAppProvider) {
@@ -76,7 +61,7 @@ async function escalatePermanentFailure(message: WhatsAppTurnQueueMessage, repos
     throw error;
   }
   try {
-    const notify = notification(provider);
+    const notify = handoffNotifier(provider);
     await notify({ conversationId: turn.conversationId, firstName: turn.identity.firstName,
       reason, summary, idempotencyKey: `handoff-failure-notification-${turn.conversationId}-${turn.revision}`,
       accountId: turn.accountId });
@@ -109,20 +94,49 @@ async function recordTurnFailure(error: unknown, message: WhatsAppTurnQueueMessa
   }
 }
 
+async function recordJourneyTurn(observation: JourneyTurnObservation) {
+  await recordOperationalMetric({
+    eventName: "journey_turn",
+    outcome: observation.result === "stale" ? "info" : "success",
+    conversationId: observation.conversationId,
+    durationMs: observation.totalMs,
+    metadata: {
+      revision: observation.revision,
+      mode: observation.mode,
+      candidateAction: observation.candidateAction,
+      deliveredAction: observation.deliveredAction,
+      replySource: observation.replySource,
+      validationIssues: observation.validationIssues.join(","),
+      planningMs: observation.planningMs,
+      result: observation.result,
+    },
+    dedupeKey: `journey-turn-${observation.conversationId}-${observation.revision}-${observation.mode}`,
+  });
+}
+
 export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, metadata) => {
   const apiKey = process.env.ZERNIO_API_KEY;
-  if (!apiKey || !process.env.DATABASE_URL || !process.env.AI_GATEWAY_API_KEY) {
+  if (!apiKey || !process.env.DATABASE_URL || !hasAiGatewayCredential()) {
     throw new Error("Queue worker configuration is incomplete");
   }
   const repository = new NeonConversationRepository();
   const provider = new ZernioWhatsAppProvider(apiKey);
-  const notifyHandoff = notification(provider);
+  const notifyHandoff = handoffNotifier(provider);
+  try {
+    await sendShiftStartDigests({ provider });
+  } catch (error) {
+    console.warn("Shift digest opportunistic check deferred", {
+      error: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
   try {
     const nextfitApiKey = process.env.NEXTFIT_API_KEY;
     const result = requireSettledQueueTurn(await processConversationTurn({ conversationId: message.conversationId,
       observedRevision: message.observedRevision, repository, provider,
       generateReply: generateWhatsAppReplyPlan,
-      preSendGraceMs: 1_500,
+      interpretTurn: interpretSemanticTurn,
+      preSendGraceMs: 300,
+      observeJourney: recordJourneyTurn,
       ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey),
         store: repository }) } : {}),
       notifyHandoff }));

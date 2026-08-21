@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ConversationMessage } from "./types.ts";
-import { adaptiveBatchDelaySeconds, applyResetToHistory, planConversationTurn } from "./turn-planning.ts";
+import { adaptiveBatchDelaySeconds, applyResetToHistory, planConversationTurn,
+  shouldResumePendingHandoff } from "./turn-planning.ts";
 
 function messages(...contents: string[]): ConversationMessage[] {
   return contents.map((content, index) => ({ id: String(index), conversationId: "conversation",
@@ -51,6 +52,7 @@ test("keeps a five-message burst ordered when it contains different topics", () 
   ));
   assert.equal(plan.messages.length, 5);
   assert.equal(plan.socialKind, undefined);
+  assert.deepEqual(plan.greeting, { daypart: "morning" });
   assert.deepEqual(plan.consolidatedMessage.split("\n"), [
     "Mensagem 1: Oi bom dia",
     "Mensagem 2: Quero massagem relaxante",
@@ -77,10 +79,32 @@ test("reset only removes prior conversational history", () => {
     ["Vamos começar do zero", "Quero massagem"]);
 });
 
-test("uses an adaptive quiet window for greetings, fragments and complete questions", () => {
-  assert.equal(adaptiveBatchDelaySeconds("Oi bom dia"), 2);
-  assert.equal(adaptiveBatchDelaySeconds("Ah também"), 9);
-  assert.equal(adaptiveBatchDelaySeconds("Dor na cervical e no ombro direito"), 9);
-  assert.equal(adaptiveBatchDelaySeconds("Qual é o endereço?"), 5);
-  assert.equal(adaptiveBatchDelaySeconds("Gostaria de conhecer os planos."), 6);
+test("explicit reset resumes only a handoff that has not been assumed", () => {
+  assert.equal(shouldResumePendingHandoff("human_requested", "Vamos começar do zero"), true);
+  assert.equal(shouldResumePendingHandoff("human_active", "Vamos começar do zero"), false);
+  assert.equal(shouldResumePendingHandoff("human_requested", "oi"), false);
+});
+
+test("uses a short adaptive quiet window for greetings, actions and complete questions", () => {
+  assert.equal(adaptiveBatchDelaySeconds("Oi bom dia"), 4);
+  assert.equal(adaptiveBatchDelaySeconds("Pode agendar"), 2);
+  assert.equal(adaptiveBatchDelaySeconds("amanhã"), 2);
+  assert.equal(adaptiveBatchDelaySeconds("15:30"), 2);
+  assert.equal(adaptiveBatchDelaySeconds("Qual é o endereço?"), 2);
+  assert.equal(adaptiveBatchDelaySeconds("Ah também"), 4);
+  assert.equal(adaptiveBatchDelaySeconds("Dor na cervical e no ombro direito"), 3);
+  assert.equal(adaptiveBatchDelaySeconds("Gostaria de conhecer os planos."), 3);
+});
+
+test("reserves the longest quiet window only for a clearly unfinished continuation", () => {
+  for (const fragment of ["E", "Quero saber também", "Tenho outra dúvida sobre", "Pode ser com"]) {
+    assert.equal(adaptiveBatchDelaySeconds(fragment), 4, fragment);
+  }
+});
+
+test("keeps every batching delay between two and four seconds", () => {
+  for (const content of ["", "Oi", "Pode marcar", "sexta-feira", "Quanto custa?", "Tenho dor", "Uma frase completa.", "e"]) {
+    assert.ok(adaptiveBatchDelaySeconds(content) >= 2, content);
+    assert.ok(adaptiveBatchDelaySeconds(content) <= 4, content);
+  }
 });

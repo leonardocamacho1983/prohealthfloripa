@@ -128,7 +128,7 @@ export default async function MetricsPage({ searchParams }: {
         </div>}
         <div className={styles.channelState}><span>Alertas no painel</span><strong>Ativo</strong></div>
         <div className={styles.channelState}><span>Alertas por WhatsApp</span><strong className={styles.pending}>
-          {whatsappChannel?.status === "enabled" ? "Ativo" : "Pendente: falta número da atendente"}</strong></div>
+          {whatsappChannel?.status === "enabled" ? "Ativo" : "Pendente: configure o perfil e os modelos"}</strong></div>
       </section>
     </div>
 

@@ -1,12 +1,13 @@
 import { getDatabase } from "@/lib/db/neon";
+import { hasConfiguredNotificationProfile } from "@/lib/attendants/repository";
 import { getMetricSnapshot } from "@/lib/metrics/repository";
 import { ensureMetricsSchema } from "@/lib/metrics/schema";
 import type { MetricPeriodDays } from "@/lib/metrics/types";
 
-import { hasConfiguredHandoffWhatsAppChannel } from "./channels";
 import { buildOperationalReconciliationPlan } from "./lifecycle";
 import { buildOperationalAlerts } from "./rules";
 import type { NotificationCandidate, NotificationChannelSetting, NotificationRecord } from "./types";
+import { cancelConversationDeliveries } from "./delivery-repository";
 
 export type HandoffNotificationResolution = "assumed" | "closed" | "taken";
 
@@ -132,7 +133,10 @@ export async function resolveHandoffNotificationsBestEffort(
   resolution: HandoffNotificationResolution,
 ): Promise<void> {
   try {
-    await resolveHandoffNotifications(conversationId, resolution);
+    await Promise.all([
+      resolveHandoffNotifications(conversationId, resolution),
+      cancelConversationDeliveries(conversationId, `handoff_${resolution}`),
+    ]);
   } catch (error) {
     console.warn("Handoff notification resolution deferred", {
       error: error instanceof Error ? error.name : "UnknownError",
@@ -151,19 +155,20 @@ export async function dismissNotification(id: string): Promise<boolean> {
 export async function listNotificationChannels(): Promise<NotificationChannelSetting[]> {
   await ensureMetricsSchema();
   const sql = getDatabase();
-  const rows = await sql`SELECT channel, status, recipient_reference, updated_at
-    FROM notification_channel_settings ORDER BY channel` as Array<{
+  const [rawRows, hasAttendantProfile] = await Promise.all([
+    sql`SELECT channel, status, recipient_reference, updated_at
+      FROM notification_channel_settings ORDER BY channel`,
+    hasConfiguredNotificationProfile(),
+  ]);
+  const rows = rawRows as Array<{
       channel: "in_app" | "whatsapp"; status: "enabled" | "pending" | "disabled";
       recipient_reference: string | null; updated_at: Date | string;
     }>;
-  const whatsappConfigured = hasConfiguredHandoffWhatsAppChannel({
-    phone: process.env.HANDOFF_ATTENDANT_PHONE,
-    templateName: process.env.ZERNIO_HANDOFF_TEMPLATE_NAME,
-  });
+  const whatsappConfigured = hasAttendantProfile && Boolean(process.env.ZERNIO_API_KEY?.trim());
   return rows.map((row) => ({
     channel: row.channel,
     status: row.channel === "whatsapp" && row.status !== "disabled"
-      ? whatsappConfigured ? "enabled" : "pending"
+      ? whatsappConfigured && row.status === "enabled" ? "enabled" : "pending"
       : row.status,
     configured: row.channel === "in_app" || whatsappConfigured || Boolean(row.recipient_reference),
     updatedAt: new Date(row.updated_at),

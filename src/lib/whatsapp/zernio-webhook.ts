@@ -18,7 +18,11 @@ export type ZernioAudioMessage = ZernioMessageBase & {
   kind: "audio";
   audio: { mediaId: string; mediaType?: string; fileName?: string };
 };
-export type ZernioIncomingMessage = ZernioTextMessage | ZernioAudioMessage;
+export type ZernioMediaMessage = ZernioMessageBase & {
+  kind: "media";
+  media: { category: "image" | "document" | "video" | "other"; mediaType?: string; fileName?: string };
+};
+export type ZernioIncomingMessage = ZernioTextMessage | ZernioAudioMessage | ZernioMediaMessage;
 
 export type ZernioWebhookParseResult =
   | { kind: "message"; message: ZernioIncomingMessage }
@@ -134,6 +138,21 @@ export function parseZernioWebhook(payload: unknown): ZernioWebhookParseResult {
           },
         },
       };
+    }
+    if (mediaId) {
+      const category = attachmentType === "image" || mediaType?.startsWith("image/")
+        ? "image"
+        : attachmentType === "document" || mediaType === "application/pdf"
+          ? "document"
+          : attachmentType === "video" || mediaType?.startsWith("video/")
+            ? "video"
+            : "other";
+      return { kind: "message", message: {
+        kind: "media", accountId, conversationId, eventId, messageId,
+        sender: { id: senderId, ...(phoneNumber ? { phoneNumber } : {}) },
+        media: { category, ...(mediaType ? { mediaType } : {}),
+          ...(nonEmptyString(candidate.fileName) ? { fileName: nonEmptyString(candidate.fileName) } : {}) },
+      } };
     }
   }
 

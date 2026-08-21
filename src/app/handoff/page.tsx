@@ -3,8 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { hasPermission } from "@/lib/auth/permissions";
+import { roleLabel } from "@/lib/auth/user-management";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
-import type { ConversationStatus } from "@/lib/conversations/types";
 import { isAppAuthorizationError, requireAppUser } from "@/lib/handoff/server-auth";
 import {
   filterAndSortInbox,
@@ -27,6 +27,17 @@ import styles from "./handoff.module.css";
 import { HandoffLiveRefresh } from "./handoff-live";
 import { QueueLinkStatus } from "./queue-link-status";
 import { QuickReplyComposer } from "./quick-reply-composer";
+import { ConversationViewed } from "./conversation-viewed";
+import { listConversationReasons } from "@/lib/reasons/repository";
+import { isFeatureEnabled } from "@/lib/feature-flags/repository";
+import { listTransferCandidates, type TransferCandidate } from "@/lib/attendants/directory";
+import { AwaitingCustomerActions } from "./awaiting-customer-actions";
+import { TransferHandoffForm } from "./transfer-form";
+import { listConversationPromises } from "@/lib/promises/repository";
+import { PromisePanel } from "./promise-panel";
+import { workflowStatusLabel } from "@/lib/ui/state-labels";
+import { AccountSummary } from "@/components/app-shell/account-summary";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export const dynamic = "force-dynamic";
 
@@ -36,14 +47,7 @@ const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
 });
 
-const statusLabel: Record<ConversationStatus, string> = {
-  active: "Com o agente",
-  human_requested: "Aguardando",
-  human_active: "Em atendimento",
-  closed: "Encerrada",
-};
-
-const allowedFilters: InboxFilter[] = ["all", "agent", "waiting", "human", "unread", "stalled", "closed"];
+const allowedFilters: InboxFilter[] = ["all", "mine", "unassigned", "team", "agent", "waiting", "customer_waiting", "human", "unread", "stalled", "closed"];
 const allowedSorts: InboxSort[] = ["longest_waiting", "recent"];
 
 type InboxSearchParams = {
@@ -51,6 +55,7 @@ type InboxSearchParams = {
   filter?: string;
   q?: string;
   sort?: string;
+  welcome?: string;
 };
 
 export default async function HandoffPage({ searchParams }: { searchParams: Promise<InboxSearchParams> }) {
@@ -67,6 +72,7 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
   const canOperate = hasPermission(appUser.role, "handoff:reply");
   const canManage = appUser.role === "admin" || appUser.role === "owner";
   const params = await searchParams;
+  const activeAccount = appUser.email?.trim() || appUser.name?.trim() || "Conta ativa";
   const filter: InboxFilter = allowedFilters.includes(params.filter as InboxFilter)
     ? params.filter as InboxFilter
     : "all";
@@ -77,9 +83,13 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
   const now = new Date();
 
   const repository = new NeonConversationRepository();
-  const [conversations, phoneIndex] = await Promise.all([
-    repository.listInboxConversations(),
+  const [conversations, phoneIndex, closureReasons, transferEnabled, awaitingCustomerEnabled, promisesEnabled] = await Promise.all([
+    repository.listInboxConversations(100, appUser.userId),
     getInboxPhoneSearchIndex(),
+    listConversationReasons({ category: "human_closure", activeOnly: true }),
+    isFeatureEnabled("conversation_transfer"),
+    isFeatureEnabled("awaiting_customer"),
+    isFeatureEnabled("promises"),
   ]);
   const searchableConversations = conversations.map((item) => ({
     ...item,
@@ -89,13 +99,24 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
   const selectedId = params.conversation ?? filtered[0]?.id;
   const selected = filtered.find((item) => item.id === selectedId);
 
+  const canForceTransfer = hasPermission(appUser.role, "handoff:force_transfer");
+  const canTransferSelected = Boolean(selected && selected.status !== "closed" && transferEnabled
+    && (selected.assignedAttendantUserId === appUser.userId || canForceTransfer));
   const selectedResources = selected
     ? await Promise.all([
       getInboxCustomerPanel(selected.id),
       listInboxQuickReplies(),
-      repository.markHandoffViewed(selected.id),
-    ]).then(([panel, replies]) => ({ panel, replies }))
-    : { panel: undefined, replies: [] as InboxQuickReply[] };
+      canTransferSelected
+        ? listTransferCandidates(selected.assignedAttendantUserId === appUser.userId ? appUser.userId : undefined)
+        : Promise.resolve([] as TransferCandidate[]),
+      canTransferSelected
+        ? listConversationReasons({ category: "handoff", activeOnly: true })
+        : Promise.resolve([]),
+      promisesEnabled ? listConversationPromises(selected.id) : Promise.resolve([]),
+    ]).then(([panel, replies, transferCandidates, transferReasons, promises]) => ({ panel, replies,
+      transferCandidates, transferReasons, promises }))
+    : { panel: undefined, replies: [] as InboxQuickReply[], transferCandidates: [] as TransferCandidate[],
+      transferReasons: [], promises: [] };
   const customerPanel = selectedResources.panel;
   const quickReplies = selectedResources.replies;
 
@@ -111,8 +132,12 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
 
   const filterLinks: Array<{ value: InboxFilter; label: string }> = [
     { value: "all", label: "Todas" },
+    { value: "mine", label: "Minhas" },
+    { value: "unassigned", label: "Sem responsável" },
+    { value: "team", label: "Equipe" },
     { value: "agent", label: "Agente" },
     { value: "waiting", label: "Aguardando" },
+    { value: "customer_waiting", label: "Aguardando cliente" },
     { value: "human", label: "Humano" },
     { value: "unread", label: "Não lidas" },
     { value: "stalled", label: "Paradas" },
@@ -122,19 +147,49 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
   return <main className={styles.shell}>
     <HandoffLiveRefresh />
     <header className={styles.header}>
-      <div className={styles.headerIdentity}><p className={styles.eyebrow}>ProHealth</p><h1>Atendimento</h1></div>
+      <div className={styles.headerIdentity}><p className={styles.eyebrow}>ProHealth</p>
+        <div className={styles.headerTitleRow}><h1>Atendimento</h1>
+          <span className={styles.queueCount}>{conversations.length} {conversations.length === 1 ? "conversa" : "conversas"}</span>
+        </div></div>
       <div className={styles.headerActions}>
-        <span className={styles.queueCount}>{conversations.length} {conversations.length === 1 ? "conversa" : "conversas"}</span>
-        {canManage ? <nav className={styles.headerNav} aria-label="Administração"><a className={styles.logout} href="/metrics">Indicadores</a>
-          <a className={styles.logout} href="/admin/users">Usuários</a>
-          <a className={styles.logout} href="/admin/training">Treinamentos</a>
-          <AsyncActionForm action="/api/catalog/sync" buttonClassName={styles.logout}
-            idleLabel="Atualizar catálogo" pendingLabel="Atualizando…" /></nav> : null}
-        <SignOutButton redirectUrl="/sign-in"><button className={styles.logout} type="button">Sair</button></SignOutButton>
+        {canManage ? <nav className={styles.headerNav} aria-label="Navegação principal">
+          <a className={styles.primaryNavLink} href="/metrics">Indicadores</a>
+          <details className={styles.menuDetails}>
+            <summary className={styles.menuSummary}>Administração <span aria-hidden="true">⌄</span></summary>
+            <div className={styles.menuPanel}>
+              <p className={styles.menuSectionTitle}>Configuração da operação</p>
+              <a className={styles.menuLink} href="/admin/users"><span>Usuários</span><small>Acessos e funções</small></a>
+              <a className={styles.menuLink} href="/admin/reasons"><span>Motivos</span><small>Transferência e encerramento</small></a>
+              <a className={styles.menuLink} href="/admin/workforce"><span>Equipe</span><small>Escalas e capacidade</small></a>
+              <a className={styles.menuLink} href="/admin/features"><span>Recursos</span><small>Ativação segura</small></a>
+              <p className={styles.menuSectionTitle}>Qualidade e inteligência</p>
+              <a className={styles.menuLink} href="/admin/knowledge"><span>Conhecimento</span><small>Conteúdo do agente</small></a>
+              <a className={styles.menuLink} href="/admin/cx"><span>CX</span><small>Pesquisas e resultados</small></a>
+              <a className={styles.menuLink} href="/admin/training"><span>Treinamentos</span><small>Desenvolvimento da equipe</small></a>
+              <AsyncActionForm action="/api/catalog/sync" buttonClassName={styles.menuAction}
+                idleLabel="Atualizar catálogo" pendingLabel="Atualizando…" />
+            </div>
+          </details>
+        </nav> : null}
+        <details className={`${styles.menuDetails} ${styles.accountMenu}`}>
+          <summary className={styles.accountSummary} aria-label={`Menu da conta ${activeAccount}`}>
+            <AccountSummary account={activeAccount} role={roleLabel(appUser.role)} avatarClassName={styles.accountAvatar} />
+            <span className={styles.accountChevron} aria-hidden="true">⌄</span>
+          </summary>
+          <div className={`${styles.menuPanel} ${styles.accountPanel}`}>
+            <a className={styles.menuLink} href="/profile"><span>Meu perfil</span><small>Horários e notificações</small></a>
+            <SignOutButton redirectUrl="/sign-in"><button className={styles.signOutAction} type="button">Sair da conta</button></SignOutButton>
+          </div>
+        </details>
       </div>
     </header>
 
-    <div className={styles.workspace}>
+    {params.welcome === "1" ? <div className={styles.welcomeBanner} role="status">
+      <span><strong>Perfil salvo.</strong> Você está conectado como {activeAccount} · {roleLabel(appUser.role)}.</span>
+      <a href="/profile">Revisar perfil</a>
+    </div> : null}
+
+    <div className={`${styles.workspace} ${selected ? styles.hasSelection : ""}`}>
       <aside className={styles.queue} aria-label="Conversas">
         <form className={styles.searchForm} action="/handoff" method="get">
           <input type="hidden" name="filter" value={filter} />
@@ -158,10 +213,10 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
           </a>)}
         </nav>
 
-        {filtered.length === 0 ? <div className={styles.empty}>
-          <h2>{query ? "Nenhuma conversa encontrada" : "Tudo em dia"}</h2>
-          <p>{query ? "Tente buscar por outro nome ou telefone." : "Nenhuma conversa neste filtro."}</p>
-        </div> : filtered.map((item) => {
+        {filtered.length === 0 ? <EmptyState className={styles.empty}
+          title={query ? "Nenhuma conversa encontrada" : "Tudo em dia"}>
+          {query ? "Tente buscar por outro nome ou telefone." : "Nenhuma conversa neste filtro."}
+        </EmptyState> : filtered.map((item) => {
           const stalled = isInboxConversationStalled(item, now);
           return <Link key={item.id} href={linkFor(filter, item.id)}
             data-conversation-link="true"
@@ -171,8 +226,17 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
             <span><strong>{item.firstName ?? "Cliente"}</strong>
               <small>{item.messages.at(-1)?.content ?? item.reason ?? "Sem mensagens"}</small>
               <span className={styles.rowLabels}>
-                <em className={`${styles.rowStatus} ${styles[`status_${item.status}`]}`}>{statusLabel[item.status]}</em>
+                <em className={`${styles.rowStatus} ${item.awaitingCustomerSince ? styles.status_awaiting_customer : styles[`status_${item.status}`]}`}>
+                  {workflowStatusLabel({ status: item.status, awaitingCustomer: Boolean(item.awaitingCustomerSince) })}</em>
+                {item.assignedAttendantUserId ? <em className={styles.ownerLabel}>
+                  {item.assignedAttendantUserId === appUser.userId ? "Com você" : "Atribuída"}
+                </em> : null}
                 {stalled ? <em className={styles.stalledLabel}>Parada</em> : null}
+                {item.slaStatus === "warning" || item.slaStatus === "breached"
+                  ? <em className={item.slaStatus === "breached" ? styles.slaBreached : styles.slaWarning}>
+                    {item.slaStatus === "breached" ? "SLA vencido" : "SLA em atenção"}</em> : null}
+                {item.openPromiseCount ? <em className={styles.ownerLabel}>{item.openPromiseCount} pendência(s)</em> : null}
+                {item.notificationFailure ? <em className={styles.slaWarning}>Falha no aviso</em> : null}
               </span>
             </span>
             <span className={styles.queueMeta}><time dateTime={item.lastActivityAt.toISOString()}>
@@ -190,33 +254,58 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
         <section className={styles.detail}>
           {!selected ? <div className={styles.noSelection}><h2>Nenhuma conversa selecionada</h2>
             <p>As conversas do agente e os atendimentos humanos aparecerão aqui.</p></div> : <>
+            <ConversationViewed conversationId={selected.id} />
             <div className={styles.detailHeader}>
-              <div><h2>{selected.firstName ?? "Cliente"}</h2>
+              <div><a className={styles.mobileBack} href={linkFor(filter)}>← Voltar às conversas</a>
+                <h2>{selected.firstName ?? "Cliente"}</h2>
                 <p>{selected.maskedPhone} · última atividade <time dateTime={selected.lastActivityAt.toISOString()}>
-                  {formatElapsed(selected.lastActivityAt, now)}</time></p></div>
-              <span className={`${styles.status} ${styles[`status_${selected.status}`]}`}>{statusLabel[selected.status]}</span>
+                  {formatElapsed(selected.lastActivityAt, now)}</time></p>
+                {selected.assignedAttendantUserId ? <p className={styles.ownerLine}>
+                  Responsável: {selected.assignedAttendantUserId === appUser.userId
+                    ? activeAccount : selected.assignedAttendantName ?? "outro atendente"}
+                </p> : <p className={styles.ownerLine}>Sem responsável</p>}</div>
+              <span className={`${styles.status} ${selected.awaitingCustomerSince ? styles.status_awaiting_customer : styles[`status_${selected.status}`]}`}>
+                {workflowStatusLabel({ status: selected.status, awaitingCustomer: Boolean(selected.awaitingCustomerSince) })}</span>
             </div>
             {selected.status === "human_requested" || selected.status === "human_active" ? <div className={styles.summary}>
               <strong>Resumo para atendimento</strong><p>{selected.summary}</p>
             </div> : null}
+            {promisesEnabled ? <PromisePanel conversationId={selected.id}
+              items={selectedResources.promises.map((item) => ({ id: item.id, description: item.description,
+                dueAt: item.dueAt.toISOString(), status: item.status }))}
+              canEdit={canOperate && selected.status === "human_active"
+                && selected.assignedAttendantUserId === appUser.userId} /> : null}
             <div className={styles.messages}>{selected.messages.map((message) => <div key={message.id}
-              className={message.direction === "inbound" ? styles.inbound : styles.outbound}>
+              className={message.kind === "workflow_event" ? styles.workflowEvent
+                : message.direction === "inbound" ? styles.inbound : styles.outbound}>
+              {message.actorLabel ? <strong className={styles.messageAuthor}>{message.actorLabel}</strong> : null}
               <p>{message.content}</p><time dateTime={message.createdAt.toISOString()}>
                 {timeFormatter.format(message.createdAt)}</time>
             </div>)}</div>
             {canOperate ? <div className={styles.actions}>
-              {selected.status === "active" ? <AsyncActionForm action={`/api/handoff/${selected.id}/assume`}
+              {selected.status === "active" && (!selected.assignedAttendantUserId || selected.assignedAttendantUserId === appUser.userId)
+                ? <AsyncActionForm action={`/api/handoff/${selected.id}/assume`}
                 buttonClassName={styles.secondary} idleLabel="Assumir conversa" pendingLabel="Assumindo…" /> : null}
-              {selected.status === "human_requested" ? <AsyncActionForm action={`/api/handoff/${selected.id}/take`}
+              {selected.status === "human_requested" && (!selected.assignedAttendantUserId || selected.assignedAttendantUserId === appUser.userId)
+                ? <AsyncActionForm action={`/api/handoff/${selected.id}/take`}
                 buttonClassName={styles.secondary} idleLabel="Assumir conversa" pendingLabel="Assumindo…" /> : null}
-              {selected.status === "human_requested" || selected.status === "human_active"
-                ? <CloseHandoffForm conversationId={selected.id} />
+              {selected.status === "human_active" && selected.assignedAttendantUserId === appUser.userId
+                ? <><CloseHandoffForm conversationId={selected.id} reasons={closureReasons} />
+                  {awaitingCustomerEnabled ? <AwaitingCustomerActions conversationId={selected.id}
+                    assignmentVersion={selected.assignmentVersion} awaiting={Boolean(selected.awaitingCustomerSince)} /> : null}</>
                 : null}
+              {canTransferSelected ? <TransferHandoffForm conversationId={selected.id}
+                assignmentVersion={selected.assignmentVersion} candidates={selectedResources.transferCandidates}
+                reasons={selectedResources.transferReasons} /> : null}
             </div> : null}
             {canOperate && (selected.status === "human_requested" || selected.status === "human_active")
-              ? <QuickReplyComposer conversationId={selected.id} quickReplies={quickReplies} />
+              && (!selected.assignedAttendantUserId || selected.assignedAttendantUserId === appUser.userId)
+              ? <QuickReplyComposer conversationId={selected.id} quickReplies={quickReplies}
+                assignmentVersion={selected.assignmentVersion} />
               : <div className={styles.readOnlyNote}>{!canOperate
                 ? "Acesso em modo leitura."
+                : selected.assignedAttendantUserId && selected.assignedAttendantUserId !== appUser.userId
+                  ? "Esta conversa está atribuída a outro atendente."
                 : selected.status === "active"
                   ? "O agente continua respondendo. Assuma a conversa para falar com o cliente."
                   : "Conversa encerrada disponível apenas para consulta."}</div>}

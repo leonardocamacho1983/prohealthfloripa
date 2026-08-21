@@ -18,6 +18,9 @@ function detectMessageIntent(content: string): string | undefined {
   if (massage.mentions.length > 0 || /\b(?:massag|massoterap)\w*/i.test(content)) {
     return "massagem";
   }
+  if (/\b(?:recovery|termoterapia|banheira|crioterapia|contraste)\w*/i.test(content)) {
+    return "recovery";
+  }
   return CONVERSATION_INTENTS.find((candidate) => candidate !== "massagem" && text.includes(candidate));
 }
 

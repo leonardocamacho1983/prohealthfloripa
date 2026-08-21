@@ -76,3 +76,49 @@ test("does not repeat a public fact sent before a burst interruption", () => {
   assert.equal(result.messages.length, 1);
   assert.doesNotMatch(result.messages.join("\n"), /Vera Linhares|2063/);
 });
+
+test("adds price, duration and hot-bath cross-sell to a commercial Relaxante reply", () => {
+  const customerMessage = "Estou tenso, com dificuldade de relaxar. Quero ver a massagem relaxante";
+  const result = ensureDeterministicReplyCoverage({
+    plan: plan(
+      "A massagem Relaxante pode contribuir para conforto e relaxamento. Qual dia você prefere?",
+    ),
+    message: customerMessage,
+    massageAnalysis: analyzeMassageRequest(customerMessage),
+  });
+  const reply = result.messages.join("\n");
+  assert.match(reply, /1 hora completa/i);
+  assert.match(reply, /R\$ 270/);
+  assert.match(reply, /banheira quente de R\$ 70 por R\$ 35/i);
+  assert.match(reply, /roupa de banho/i);
+  assert.match(reply, /toalhas macias, ducha e secador/i);
+});
+
+test("does not duplicate commercial massage facts already answered", () => {
+  const customerMessage = "Quero ver a massagem relaxante";
+  const original = plan(
+    "A Relaxante custa R$ 270 no avulso e o atendimento ocupa 1 hora completa.",
+  );
+  const result = ensureDeterministicReplyCoverage({
+    plan: original,
+    message: customerMessage,
+    massageAnalysis: analyzeMassageRequest(customerMessage),
+  });
+  const reply = result.messages.join("\n");
+  assert.equal(reply.match(/R\$ 270/g)?.length, 1);
+  assert.equal(reply.match(/1 hora completa/g)?.length, 1);
+  assert.match(reply, /banheira quente de R\$ 70 por R\$ 35/i);
+});
+
+test("a prior Relaxante recommendation does not suppress a bath that was never offered", () => {
+  const customerMessage = "Quero a massagem Relaxante para relaxar";
+  const result = ensureDeterministicReplyCoverage({
+    plan: plan("Perfeito, podemos seguir com a Relaxante."),
+    message: customerMessage,
+    massageAnalysis: analyzeMassageRequest(customerMessage),
+    priorAssistantMessages: [
+      "Para conforto e relaxamento, a massagem Relaxante tende a combinar melhor.",
+    ],
+  });
+  assert.match(result.messages.join("\n"), /banheira quente de R\$ 70 por R\$ 35/i);
+});

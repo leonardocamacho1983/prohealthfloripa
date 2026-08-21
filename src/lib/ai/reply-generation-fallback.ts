@@ -3,7 +3,8 @@ import { summarizeAiError, type SafeAiErrorSummary } from "./error-summary.ts";
 export type WhatsAppReplyGenerationMode =
   | "structured"
   | "plain_text_fallback"
-  | "deterministic_fallback";
+  | "deterministic_fallback"
+  | "deterministic_journey";
 
 export type WhatsAppReplyPlan = {
   messages: string[];

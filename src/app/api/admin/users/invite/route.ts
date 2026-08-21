@@ -43,6 +43,7 @@ export async function POST(request: Request) {
       emailAddress: email,
       publicMetadata: { role },
       notify: true,
+      redirectUrl: `${process.env.APP_URL ?? new URL(request.url).origin}/sign-up`,
     });
     await recordAuditEvent({
       actorUserId: principal.userId,

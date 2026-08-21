@@ -1,7 +1,10 @@
 import { getDatabase } from "../db/neon.ts";
 import type { AuditEvent } from "./types";
 
-const ALLOWED_METADATA_KEYS = new Set(["reason", "statusCode", "errorType"]);
+const ALLOWED_METADATA_KEYS = new Set([
+  "reason", "reasonId", "statusCode", "errorType", "assignedAttendantUserId",
+  "targetUserId", "expectedAssignmentVersion", "enabled", "featureFlag",
+]);
 let schemaPromise: Promise<void> | undefined;
 
 export function sanitizeAuditMetadata(metadata?: Record<string, unknown>): Record<string, string | number | boolean | null> {

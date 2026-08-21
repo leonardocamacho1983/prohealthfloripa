@@ -22,6 +22,7 @@ const errorMessage = (value?: string) => ({
   actor_not_allowed: "Sua função não permite essa alteração.",
   "last-owner": "O último proprietário não pode perder essa função.",
   invalid: "Revise o e-mail e a função informados.",
+  invite_missing: "O convite não está mais pendente.",
 }[value ?? ""] ?? "Não foi possível concluir. Confira os dados e tente novamente.");
 
 function primaryEmail(user: { primaryEmailAddress?: { emailAddress: string } | null; emailAddresses: Array<{ emailAddress: string }> }) {
@@ -66,8 +67,9 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
     <div className={styles.content}>
       <section className={styles.card}>
         <h2>Convidar usuário</h2>
-        <p className={styles.cardIntro}>O Clerk enviará o acesso por e-mail. A função controla o que a pessoa poderá fazer.</p>
-        {params.success === "invited" ? <p className={styles.notice}>Convite enviado.</p> : null}
+        <p className={styles.cardIntro}>Escolha a função antes de enviar. Ela será aplicada automaticamente quando a pessoa aceitar o convite.</p>
+        {params.success === "invited" ? <p className={styles.notice}>Convite criado. Se o e-mail não chegar, use o link direto na lista de pendentes.</p> : null}
+        {params.success === "resent" ? <p className={styles.notice}>Convite anterior cancelado e um novo e-mail enviado.</p> : null}
         {params.error ? <p className={styles.error}>{errorMessage(params.error)}</p> : null}
         <form className={styles.form} action="/api/admin/users/invite" method="post">
           <label>E-mail
@@ -104,7 +106,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
                   <option value="admin">Administrador</option>
                   {principal.role === "owner" ? <option value="owner" disabled={!canAssignRole(principal.role, "owner")}>Proprietário</option> : null}
                 </select>
-                <button type="submit">Salvar</button>
+                <button type="submit">Atualizar</button>
               </form>}
             </article>;
           })}
@@ -118,8 +120,16 @@ export default async function UsersPage({ searchParams }: { searchParams: Promis
           <h3>Convites pendentes ({invitations.totalCount})</h3>
           {invitations.data.map((invitation) => {
             const role = parseAppRole(invitation.publicMetadata?.role);
-            return <p key={invitation.id}><span>{invitation.emailAddress}</span>
-              <small>{role ? roleLabel(role) : "Sem função"}</small></p>;
+            return <div className={styles.pendingInvite} key={invitation.id}>
+              <div><strong>{invitation.emailAddress}</strong><small>{role ? roleLabel(role) : "Sem função"}</small></div>
+              <div className={styles.inviteActions}>
+                {invitation.url ? <a href={invitation.url} target="_blank" rel="noreferrer">Abrir convite</a> : null}
+                <form action={`/api/admin/invitations/${invitation.id}/resend`} method="post">
+                  <input type="hidden" name="email" value={invitation.emailAddress} />
+                  <button type="submit">Reenviar</button>
+                </form>
+              </div>
+            </div>;
           })}
           {invitationTotalPages > 1 ? <nav className={styles.pagination} aria-label="Paginação de convites">
             {invitePage > 1 ? <a href={`/admin/users?page=${page}&invitePage=${invitePage - 1}`}>Anterior</a> : <span />}

@@ -1,5 +1,6 @@
 import type { ConversationMessage } from "./types.ts";
-import { classifySocialMessage, isGreetingMessage, type SocialMessageKind } from "./social-message.ts";
+import { classifySocialMessage, detectGreetingContext, isGreetingMessage,
+  type GreetingContext, type SocialMessageKind } from "./social-message.ts";
 
 export type TurnPlan = {
   messages: ConversationMessage[];
@@ -8,12 +9,15 @@ export type TurnPlan = {
   resetRequested: boolean;
   repairRequested: boolean;
   socialKind?: SocialMessageKind;
+  greeting?: GreetingContext;
 };
 
 const COMPLETE_CANCELLATION = /^(?:n[aã]o\s+)?(?:precisa|preciso)\s+(?:me\s+)?responder(?:\s+(?:mais|isso))?$|^(?:n[aã]o\s+responda|pode\s+ignorar|deixa\s+pra\s+l[aá])$/i;
 const RESET = /\b(?:(?:vamos|quero|pode|podemos)\s+)?(?:come[cç]ar|recome[cç]ar)\s+(?:do\s+zero|de\s+novo)\b/i;
 const CONTRADICTION_REPAIR = /\b(?:u[eé]+(?=\W|$)|mas\s+(?:voc[eê]|vc|o\s+agente)\s+(?:disse|falou|informou)|n[aã]o\s+entendi|(?:voc[eê]|vc)\s+(?:se\s+)?contradisse|isso\s+n[aã]o\s+faz\s+sentido)/i;
 const CONTINUATION_ENDING = /\b(?:e|tamb[eé]m|ah|pera|ali[aá]s|porque|que|sobre|com|pra|para)$/i;
+const EXPLICIT_ACTION = /^(?:(?:sim|ok|pode|quero|vamos)(?:,|\s)+)*(?:pode\s+)?(?:agendar|marcar|confirmar|encaminhar)(?:\s+(?:isso|pra\s+mim|para\s+mim))?[.!]?$/i;
+const SCHEDULING_DETAIL = /^(?:hoje|amanh[aã]|depois\s+de\s+amanh[aã]|(?:segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(?:-feira)?|(?:[0-2]?\d)(?::[0-5]\d|h(?:[0-5]\d)?)|(?:de\s+)?(?:manh[aã]|tarde|noite))[.!]?$/i;
 
 function normalized(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -23,6 +27,10 @@ export function isExplicitResetMessage(text: string): boolean {
   return RESET.test(normalized(text));
 }
 
+export function shouldResumePendingHandoff(status: string | undefined, text: string): boolean {
+  return status === "human_requested" && isExplicitResetMessage(text);
+}
+
 export function isRepairSignal(text: string): boolean {
   return CONTRADICTION_REPAIR.test(normalized(text));
 }
@@ -30,6 +38,7 @@ export function isRepairSignal(text: string): boolean {
 function resolveSocialKind(kinds: Array<SocialMessageKind | undefined>): SocialMessageKind | undefined {
   if (!kinds.length || kinds.some((kind) => !kind)) return undefined;
   const socialKinds = kinds as SocialMessageKind[];
+  if (socialKinds.includes("satisfaction")) return "satisfaction";
   if (socialKinds.includes("farewell")) return "farewell";
   if (socialKinds.includes("gratitude")) return "gratitude";
   if (socialKinds.includes("greeting")) return "greeting";
@@ -38,16 +47,26 @@ function resolveSocialKind(kinds: Array<SocialMessageKind | undefined>): SocialM
 
 export function adaptiveBatchDelaySeconds(text: string): number {
   const message = normalized(text);
-  if (!message) return 4;
-  // A greeting can be acknowledged quickly. If a substantive message follows,
-  // its newer revision invalidates this draft before it is sent.
-  if (isGreetingMessage(message)) return 2;
-  // Short WhatsApp fragments are the strongest signal that the customer is
-  // composing a burst across several bubbles. Every new inbound resets this
-  // window through conversations.next_process_at.
-  if (message.length <= 80 && (!/[.?!]$/.test(message) || CONTINUATION_ENDING.test(message))) return 9;
-  if (message.length > 3 && /[?!]$/.test(message)) return 5;
-  return 6;
+  if (!message) return 3;
+  // People commonly send greeting, check-in and request as separate bubbles.
+  // Give that burst the same quiet window as another short WhatsApp fragment.
+  if (isGreetingMessage(message)) return 4;
+  // Explicit authorization is safe to process immediately when the journey is
+  // already complete. The conversation revision still invalidates a pending
+  // draft if another bubble arrives while it is being processed.
+  if (EXPLICIT_ACTION.test(message)) return 2;
+  // A standalone date, time or period is actionable, but retains a short quiet
+  // window for customers who send scheduling details in separate bubbles.
+  if (SCHEDULING_DETAIL.test(message)) return 2;
+  if (message.length > 3 && /[?!]$/.test(message)) return 2;
+  // An ending connector is strong evidence that the customer has not finished
+  // the sentence yet. Four seconds is the maximum adaptive window.
+  if (CONTINUATION_ENDING.test(message)) return 4;
+  // Short WhatsApp fragments commonly form a burst. Every newer inbound resets
+  // conversations.next_process_at, preserving their ordering without imposing
+  // the previous nine-second pause on every turn.
+  if (message.length <= 80 && !/[.!]$/.test(message)) return 3;
+  return 3;
 }
 
 export function planConversationTurn(messages: ConversationMessage[]): TurnPlan {
@@ -65,6 +84,7 @@ export function planConversationTurn(messages: ConversationMessage[]): TurnPlan 
   const repairRequested = texts.some(isRepairSignal);
   const socialKinds = texts.map(classifySocialMessage);
   const socialKind = resolveSocialKind(socialKinds);
+  const greeting = texts.map(detectGreetingContext).find((candidate) => candidate !== undefined);
   const consolidatedMessage = texts.map((text, index) => `Mensagem ${index + 1}: ${text}`).join("\n");
   return {
     messages: active,
@@ -73,6 +93,7 @@ export function planConversationTurn(messages: ConversationMessage[]): TurnPlan 
     resetRequested: lastReset >= 0,
     repairRequested,
     ...(socialKind ? { socialKind } : {}),
+    ...(greeting ? { greeting } : {}),
   };
 }
 

@@ -11,9 +11,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-strip-types src/lib/**/*.test.ts"
+    "test": "node --test --experimental-strip-types src/lib/**/*.test.ts",
+    "test:integration": "node --env-file-if-exists=.env.local --import tsx scripts/test-integration.ts",
+    "test:evaluation": "node --test --experimental-strip-types src/lib/evaluations/*.test.ts src/lib/knowledge/*.test.ts",
+    "test:e2e": "playwright test",
+    "db:ensure": "node --env-file=.env.local --import tsx scripts/apply-runtime-schemas.ts",
+    "verify": "npm run lint && npm run test && npm run test:integration && npm run test:evaluation && npm run build"
   },
   "dependencies": {
+    "@clerk/localizations": "^4.15.4",
     "@clerk/nextjs": "^7.7.6",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/queue": "^0.4.0",
@@ -23,11 +29,13 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
+    "tsx": "^4.23.12",
     "typescript": "^5"
   }
 }

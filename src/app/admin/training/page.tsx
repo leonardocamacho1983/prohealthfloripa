@@ -24,7 +24,7 @@ export default async function TrainingPage() {
   return <main className={styles.shell}>
     <header className={styles.header}>
       <div><p>ProHealth · conhecimento</p><h1>Treinamentos</h1></div>
-      <nav><a href="/handoff">Atendimento</a><a href="/metrics">Indicadores</a></nav>
+      <nav><a href="/handoff">Atendimento</a><a href="/admin/knowledge">Publicações</a><a href="/admin/reasons">Motivos</a><a href="/metrics">Indicadores</a></nav>
     </header>
     <section className={styles.card}><TrainingEnrollmentForm /></section>
     {sessions.length === 0 ? <section className={styles.card}><h2>Nenhum treinamento</h2>
@@ -41,6 +41,25 @@ export default async function TrainingPage() {
             {item.riskFlags.length ? <p>Revisar: {item.riskFlags.join(", ")}</p> : null}
           </li>)}
         </ol>}
+        {session.status === "pending_review" ? <>
+          {session.items.some((item) => item.type === "unknown" || item.needsClarification || item.riskFlags.length > 0)
+            ? <p className={styles.warning}>Esta sessão possui itens sem classificação, dúvidas ou riscos. Ela pode ser rejeitada, mas só poderá ser aprovada depois da correção.</p>
+            : null}
+          <form className={styles.reviewForm} action={`/api/admin/training/${session.id}/review`} method="post">
+            <label>Nota da revisão <span>(opcional ao aprovar; recomendada ao rejeitar)</span>
+              <textarea name="note" rows={3} maxLength={1000} placeholder="Decisão, evidências ou ajustes necessários" /></label>
+            <div className={styles.reviewActions}>
+              <button className={styles.rejectButton} type="submit" name="decision" value="rejected">Rejeitar propostas</button>
+              <button type="submit" name="decision" value="approved"
+                disabled={session.items.some((item) => item.type === "unknown" || item.needsClarification || item.riskFlags.length > 0)}>
+                Aprovar propostas
+              </button>
+            </div>
+          </form>
+        </> : null}
+        {session.reviewedAt ? <p className={styles.clear}>Revisado em {session.reviewedAt.toLocaleString("pt-BR", {
+          timeZone: "America/Sao_Paulo",
+        })}. {session.reviewNote ? `Nota: ${session.reviewNote}` : "A revisão não altera automaticamente o conhecimento em produção."}</p> : null}
       </section>)}
   </main>;
 }

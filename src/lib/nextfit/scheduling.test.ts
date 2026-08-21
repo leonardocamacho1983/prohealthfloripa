@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildSchedulingInstructions, detectSchedulingIntent } from "./scheduling.ts";
+import {
+  buildSchedulingInstructions,
+  detectSchedulingIntent,
+  shouldHandoffSchedulingRequest,
+} from "./scheduling.ts";
 
 test("recognizes a service plus a date as scheduling intent", () => {
   assert.deepEqual(detectSchedulingIntent("Preciso de massagem relaxante hoje"), {
     requested: true, hasService: true, hasDatePreference: true,
-    hasDayPreference: true, hasPeriodPreference: false,
+    hasDayPreference: true, hasPeriodPreference: false, hasExactTimePreference: false,
   });
 });
 
@@ -31,4 +35,35 @@ test("uses only a valid HTTPS booking URL and never claims a booking", () => {
   assert.match(instructions ?? "", /não declare que uma reserva foi criada/i);
   const unsafe = buildSchedulingInstructions("Massagem hoje", "javascript:alert(1)");
   assert.doesNotMatch(unsafe ?? "", /javascript:/);
+});
+
+test("an exact hour is more specific than a broad period", () => {
+  const intent = detectSchedulingIntent("Massagem amanhã às 14?");
+  assert.equal(intent.hasDayPreference, true);
+  assert.equal(intent.hasExactTimePreference, true);
+  assert.equal(intent.hasPeriodPreference, true);
+});
+
+test("consolidates service and exact time across consecutive customer turns", () => {
+  const instructions = buildSchedulingInstructions(
+    "amanhã às 14?",
+    undefined,
+    ["Quero ver a massagem relaxante"],
+  );
+  assert.match(instructions ?? "", /pedido já contém serviço, dia e período/i);
+  assert.doesNotMatch(instructions ?? "", /descobrir:/i);
+  assert.match(instructions ?? "", /encaminhar a conversa para a equipe/i);
+});
+
+test("explicit scheduling authorization can hand off when complete context is in history", () => {
+  assert.equal(shouldHandoffSchedulingRequest(
+    "ok pode agendar",
+    ["Quero massagem relaxante", "amanhã às 14"],
+    undefined,
+  ), true);
+  assert.equal(shouldHandoffSchedulingRequest(
+    "ok pode agendar",
+    ["Quero massagem relaxante"],
+    undefined,
+  ), false);
 });

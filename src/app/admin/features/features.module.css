@@ -1,0 +1,23 @@
+.shell { min-height: 100vh; background: #f4f7f5; color: #183128; }
+.shell > header { min-height: 82px; padding: 18px 32px; background: #fff; border-bottom: 1px solid #dfe7e2; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.shell header p { margin: 0; color: #168653; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
+.shell h1 { margin: 3px 0 0; font-size: 27px; }
+.shell nav { display: flex; gap: 14px; }
+.shell nav a { color: #315e49; font-weight: 750; }
+.content { max-width: 1040px; margin: 0 auto; padding: 32px 24px 60px; }
+.intro { margin-bottom: 22px; }
+.intro h2 { margin: 0 0 7px; }
+.intro p, .card p { color: #607169; line-height: 1.55; }
+.notice, .error { padding: 12px 14px; border-radius: 9px; }
+.notice { background: #e4f4e9; color: #155e3d; }
+.error { background: #fff0ee; color: #9c352c; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+.card { background: #fff; border: 1px solid #dfe7e2; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; }
+.card h2 { margin: 9px 0 0; font-size: 19px; }
+.card small { color: #819087; }
+.enabled, .disabled { border-radius: 999px; padding: 5px 8px; font-size: 11px; font-weight: 850; }
+.enabled { background: #dff2e6; color: #126a43; }
+.disabled { background: #edf0ee; color: #68766f; }
+.card button { width: 100%; min-height: 42px; border: 0; border-radius: 9px; background: #177d50; color: #fff; font-weight: 800; cursor: pointer; }
+.shell :where(a, button):focus-visible { outline: 3px solid #36a66f; outline-offset: 2px; }
+@media (max-width: 680px) { .grid { grid-template-columns: 1fr; } .shell > header { padding: 16px 20px; } }

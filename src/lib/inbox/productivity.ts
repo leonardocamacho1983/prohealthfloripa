@@ -2,7 +2,7 @@ import type { InboxConversation } from "@/lib/handoff/types";
 
 export const INBOX_STALLED_AFTER_MINUTES = 15;
 
-export type InboxFilter = "all" | "agent" | "waiting" | "human" | "closed" | "unread" | "stalled";
+export type InboxFilter = "all" | "mine" | "unassigned" | "team" | "agent" | "waiting" | "customer_waiting" | "human" | "closed" | "unread" | "stalled";
 export type InboxSort = "longest_waiting" | "recent";
 
 export type SearchableInboxConversation = InboxConversation & {
@@ -64,8 +64,12 @@ export function matchesInboxFilter(
   now = new Date(),
 ): boolean {
   if (filter === "all") return true;
+  if (filter === "mine") return item.ownerScope === "mine";
+  if (filter === "unassigned") return item.ownerScope === "unassigned";
+  if (filter === "team") return item.ownerScope === "team";
   if (filter === "agent") return item.status === "active";
   if (filter === "waiting") return item.status === "human_requested";
+  if (filter === "customer_waiting") return item.status === "human_active" && Boolean(item.awaitingCustomerSince);
   if (filter === "human") return item.status === "human_active";
   if (filter === "closed") return item.status === "closed";
   if (filter === "unread") return item.unreadCount > 0;
@@ -84,9 +88,14 @@ export function filterAndSortInbox<T extends SearchableInboxConversation>(
   const result = items.filter((item) => matchesInboxFilter(item, options.filter, now)
     && matchesInboxSearch(item, options.query ?? ""));
 
-  return result.sort((left, right) => options.sort === "recent"
-    ? right.lastActivityAt.getTime() - left.lastActivityAt.getTime()
-    : waitingSince(left).getTime() - waitingSince(right).getTime());
+  return result.sort((left, right) => {
+    if (options.sort === "recent") return right.lastActivityAt.getTime() - left.lastActivityAt.getTime();
+    const risk = (item: T) => item.actionPriority ?? (item.slaStatus === "breached" ? 0 : item.slaStatus === "warning" ? 1
+      : item.ownerScope === "unassigned" && item.status === "human_requested" ? 2 : 3);
+    return risk(left) - risk(right)
+      || waitingSince(left).getTime() - waitingSince(right).getTime()
+      || left.id.localeCompare(right.id);
+  });
 }
 
 export function formatElapsed(date: Date, now = new Date()): string {

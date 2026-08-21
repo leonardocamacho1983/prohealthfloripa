@@ -76,6 +76,30 @@
   font-weight: 800;
   cursor: pointer;
 }
+.trainingForm,
+.reviewForm {
+  display: grid;
+  gap: 14px;
+}
+.trainingForm > p { margin: 4px 0; color: #5b6f66; line-height: 1.5; }
+.trainingForm label,
+.reviewForm label { display: grid; gap: 7px; color: #42544b; font-size: 13px; font-weight: 750; }
+.trainingForm input,
+.reviewForm textarea {
+  width: 100%;
+  border: 1px solid #cbd7cf;
+  border-radius: 9px;
+  padding: 11px 12px;
+  color: #20372d;
+  font: inherit;
+}
+.trainingForm button + button { margin-top: -6px; background: #edf4ef; color: #276047; }
+.reviewForm { margin-top: 22px; padding-top: 20px; border-top: 1px solid #e3e8e4; }
+.reviewForm label span { color: #75847c; font-weight: 500; }
+.reviewForm textarea { resize: vertical; }
+.reviewActions { display: flex; justify-content: flex-end; gap: 9px; }
+.reviewActions .rejectButton { border: 1px solid #e4cece; background: #fff; color: #873b3b; }
+.reviewActions button:disabled { cursor: not-allowed; opacity: .45; }
 .success,
 .warning,
 .clear {

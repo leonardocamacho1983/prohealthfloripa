@@ -9,6 +9,7 @@ import { analyzeMassageRequest } from "../knowledge/massage-catalog-semantics.ts
 import {
   buildGroundedMassageFallback,
   prepareWhatsAppModelMessages,
+  WHATSAPP_GENERATION_TIMEOUTS_MS,
 } from "./generate-whatsapp-reply.ts";
 import { generateReplyPlanWithFallback } from "./reply-generation-fallback.ts";
 
@@ -27,6 +28,12 @@ function message(input: {
     createdAt: new Date("2026-08-17T09:30:00.000Z"),
   };
 }
+
+test("model fallback attempts share a maximum ten-second timeout budget", () => {
+  assert.equal(WHATSAPP_GENERATION_TIMEOUTS_MS.structured, 7_000);
+  assert.equal(WHATSAPP_GENERATION_TIMEOUTS_MS.plainText, 3_000);
+  assert.ok(WHATSAPP_GENERATION_TIMEOUTS_MS.structured + WHATSAPP_GENERATION_TIMEOUTS_MS.plainText <= 10_000);
+});
 
 test("first turn is always sent to AI SDK as a real non-empty user message", () => {
   const current = message({ id: "current", content: "Quero massagem relaxante" });

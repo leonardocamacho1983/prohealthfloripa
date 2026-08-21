@@ -1,0 +1,111 @@
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f4f7f5;
+  color: #183128;
+}
+
+.card {
+  width: min(560px, 100%);
+  padding: 32px;
+  border: 1px solid #dfe7e1;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 16px 42px #17352612;
+}
+
+.eyebrow {
+  margin: 0 0 18px;
+  color: #117a4b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.status {
+  display: inline-flex;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #fff4d8;
+  color: #73520b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.card h1 {
+  margin: 16px 0 8px;
+  font-size: clamp(30px, 6vw, 42px);
+  line-height: 1.05;
+}
+
+.lead {
+  margin: 0;
+  color: #617068;
+  line-height: 1.6;
+}
+
+.identity {
+  margin: 24px 0;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e1e8e3;
+  border-radius: 12px;
+  background: #f8faf8;
+}
+
+.identity div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.identity dt {
+  color: #68776f;
+}
+
+.identity dd {
+  margin: 0;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.card button {
+  border: 0;
+  border-radius: 9px;
+  background: #147a4c;
+  color: #fff;
+  padding: 11px 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.card button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.card div > p {
+  margin: 9px 0 18px;
+  color: #6b7b73;
+  font-size: 12px;
+}
+
+.card .secondary {
+  background: transparent;
+  color: #53675d;
+  padding-left: 0;
+}
+
+.card button:focus-visible {
+  outline: 3px solid #36a66f;
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .card { padding: 24px; }
+  .identity div { grid-template-columns: 1fr; gap: 3px; }
+}

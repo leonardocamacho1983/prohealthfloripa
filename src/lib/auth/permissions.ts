@@ -7,6 +7,10 @@ export const APP_PERMISSIONS = [
   "handoff:assume",
   "handoff:reply",
   "handoff:close",
+  "handoff:transfer",
+  "handoff:force_transfer",
+  "operations:configure",
+  "notifications:test",
   "catalog:sync",
   "users:manage",
   "audit:view",
@@ -22,6 +26,8 @@ const permissionsByRole: Record<AppRole, ReadonlySet<AppPermission>> = {
     "handoff:assume",
     "handoff:reply",
     "handoff:close",
+    "handoff:transfer",
+    "notifications:test",
   ]),
 };
 

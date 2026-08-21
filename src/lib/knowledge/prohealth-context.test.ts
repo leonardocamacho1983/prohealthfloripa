@@ -183,3 +183,68 @@ test("uses Joao's confirmed monthly recovery recurrence", () => {
   assert.match(instructions, /8 sessões no mês/);
   assert.doesNotMatch(instructions, /6x R\$ 350/);
 });
+
+test("trains the agent to offer the complete experience after experimental Pilates", () => {
+  const instructions = buildProHealthInstructions(
+    "Quero marcar uma aula experimental de Pilates",
+  );
+
+  assert.match(instructions, /aula experimental de Pilates é oferecida gratuitamente/i);
+  assert.match(instructions, /de R\$ 70 por R\$ 35/);
+  assert.match(instructions, /de R\$ 100 por R\$ 50/);
+  assert.match(instructions, /depois da aula/);
+  assert.match(instructions, /permanecer conosco por mais uma hora/);
+  assert.match(instructions, /roupa de banho/);
+  assert.match(instructions, /toalhas macias, secas e cheirosas/);
+  assert.match(instructions, /chuveiro ou ducha/);
+  assert.match(instructions, /secador de cabelo/);
+});
+
+test("prioritizes same-day conversion instead of an open recovery voucher", () => {
+  const instructions = buildProHealthInstructions(
+    "Posso fazer a banheira junto com a experimental?",
+  );
+
+  assert.match(instructions, /horários consecutivos no mesmo dia/);
+  assert.match(instructions, /preferencialmente em até 72 horas/);
+  assert.match(instructions, /não oferecer um benefício aberto/i);
+  assert.match(instructions, /Nunca afirmar que reservou ou que existe vaga/i);
+  assert.match(instructions, /Evitar voucher aberto/i);
+});
+
+test("keeps hot recovery after Pilates and routine safety checks out of ordinary conversation", () => {
+  const instructions = buildProHealthInstructions(
+    "Depois do Pilates eu queria relaxar na banheira quente",
+  );
+
+  assert.match(instructions, /banheira quente nunca deve ser oferecida antes do Pilates/i);
+  assert.match(instructions, /não deve ser mencionada em uma conversa comum/i);
+  assert.match(instructions, /não mencionar triagem, anamnese, contraindicações nem o risco de queda de pressão/i);
+  assert.match(instructions, /Por protocolo da equipe, a experiência com a banheira quente é realizada depois da aula/);
+});
+
+test("connects common recovery motives without clinical promises", () => {
+  const instructions = buildProHealthInstructions(
+    "Fico dolorido depois de treino intenso e queria conhecer o espaço",
+  );
+
+  assert.match(instructions, /percepção de recovery e dor muscular tardia/i);
+  assert.match(instructions, /sem diagnosticar nem prometer resultado/i);
+  assert.match(instructions, /primeira experiência na banheira de gelo ou quente/i);
+});
+
+test("trains cross-sell and evidence-based recovery upsell without pressure", () => {
+  const instructions = buildProHealthInstructions(
+    "Já faço Pilates aí e queria conhecer o recovery depois do treino",
+  );
+
+  assert.match(instructions, /COMPLEMENTO DE TERMOTERAPIA/);
+  assert.match(instructions, /termoterapia pode complementar qualquer serviço/i);
+  assert.match(instructions, /no máximo uma apresentação de termoterapia por conversa ativa/i);
+  assert.match(instructions, /não insistir nem reformular a mesma oferta/i);
+  assert.match(instructions, /Depois da primeira utilização, perguntar como foi a experiência/i);
+  assert.match(instructions, /O segundo uso volta ao valor normal/i);
+  assert.match(instructions, /histórico objetivo de usos repetidos/i);
+  assert.match(instructions, /R\$ 350 por mês; 2 sessões por semana; 8 sessões no mês/);
+  assert.match(instructions, /não presumir recorrência nem pressionar/i);
+});

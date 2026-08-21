@@ -1,5 +1,6 @@
 import { getDatabase } from "@/lib/db/neon";
 import { ensureConversationRuntimeSchema } from "@/lib/conversations/neon-repository";
+import { createKnowledgeChangeSet } from "@/lib/knowledge/governance";
 
 export type TrainingProfile = { id: string; displayName: string };
 export type TrainingItemInput = {
@@ -16,6 +17,7 @@ export function ensureTrainingSchema(): Promise<void> {
     schemaPromise = ensureConversationRuntimeSchema().then(() => sql.transaction((tx) => [
       tx`CREATE TABLE IF NOT EXISTS training_profiles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contact_id uuid NOT NULL REFERENCES contacts(id) ON DELETE CASCADE, provider_account_id text NOT NULL, display_name text NOT NULL DEFAULT 'Treinador', active boolean NOT NULL DEFAULT true, enrolled_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), UNIQUE(contact_id, provider_account_id))`,
       tx`CREATE TABLE IF NOT EXISTS training_sessions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), profile_id uuid NOT NULL REFERENCES training_profiles(id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'collecting' CHECK(status IN ('collecting','pending_review','approved','rejected','cancelled')), submitted_at timestamptz, review_due_at timestamptz, reviewed_at timestamptz, reviewed_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`,
+      tx`ALTER TABLE training_sessions ADD COLUMN IF NOT EXISTS review_note text`,
       tx`CREATE UNIQUE INDEX IF NOT EXISTS training_one_collecting_session ON training_sessions(profile_id) WHERE status='collecting'`,
       tx`CREATE TABLE IF NOT EXISTS training_items (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), session_id uuid NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE, inbound_message_id uuid NOT NULL REFERENCES messages(id) ON DELETE RESTRICT, sequence_number integer NOT NULL, item_type text NOT NULL CHECK(item_type IN ('commercial_fact','tone','faq','correction','workflow','unknown')), summary text NOT NULL, needs_clarification boolean NOT NULL DEFAULT false, clarification_question text, risk_flags jsonb NOT NULL DEFAULT '[]'::jsonb, source_kind text NOT NULL CHECK(source_kind IN ('text','audio')), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(inbound_message_id), UNIQUE(session_id, sequence_number))`,
     ]).then(() => undefined)).catch((error) => { schemaPromise = undefined; throw error; });
@@ -27,23 +29,29 @@ export class TrainingRepository {
   async listSessions() {
     await ensureTrainingSchema(); const sql = getDatabase();
     const rows = await sql`SELECT s.id, s.status, s.created_at, s.submitted_at, s.review_due_at,
+      s.reviewed_at, s.reviewed_by, s.review_note,
       p.display_name, i.sequence_number, i.item_type, i.summary, i.needs_clarification,
       i.clarification_question, i.risk_flags, i.source_kind
       FROM training_sessions s JOIN training_profiles p ON p.id=s.profile_id
       LEFT JOIN training_items i ON i.session_id=s.id
       ORDER BY s.created_at DESC, i.sequence_number ASC` as Array<{
         id: string; status: string; created_at: Date; submitted_at: Date | null; review_due_at: Date | null;
+        reviewed_at: Date | null; reviewed_by: string | null; review_note: string | null;
         display_name: string; sequence_number: number | null; item_type: string | null; summary: string | null;
         needs_clarification: boolean | null; clarification_question: string | null; risk_flags: unknown;
         source_kind: string | null;
       }>;
     const sessions = new Map<string, { id: string; status: string; trainer: string; createdAt: Date;
-      submittedAt?: Date; reviewDueAt?: Date; items: Array<{ sequence: number; type: string; summary: string;
+      submittedAt?: Date; reviewDueAt?: Date; reviewedAt?: Date; reviewedBy?: string; reviewNote?: string;
+      items: Array<{ sequence: number; type: string; summary: string;
         needsClarification: boolean; clarificationQuestion?: string; sourceKind: string; riskFlags: string[] }> }>();
     for (const row of rows) {
       const session = sessions.get(row.id) ?? { id: row.id, status: row.status, trainer: row.display_name,
         createdAt: new Date(row.created_at), ...(row.submitted_at ? { submittedAt: new Date(row.submitted_at) } : {}),
-        ...(row.review_due_at ? { reviewDueAt: new Date(row.review_due_at) } : {}), items: [] };
+        ...(row.review_due_at ? { reviewDueAt: new Date(row.review_due_at) } : {}),
+        ...(row.reviewed_at ? { reviewedAt: new Date(row.reviewed_at) } : {}),
+        ...(row.reviewed_by ? { reviewedBy: row.reviewed_by } : {}),
+        ...(row.review_note ? { reviewNote: row.review_note } : {}), items: [] };
       if (row.sequence_number !== null && row.summary && row.item_type && row.source_kind) {
         session.items.push({ sequence: row.sequence_number, type: row.item_type, summary: row.summary,
           needsClarification: Boolean(row.needs_clarification),
@@ -113,6 +121,23 @@ export class TrainingRepository {
       RETURNING (SELECT count(*)::int FROM training_items i WHERE i.session_id=s.id) item_count`) as Array<{ item_count: number }>;
     if (rows[0]) return { count: rows[0].item_count, alreadySubmitted: false };
     return { count: 0, alreadySubmitted: true };
+  }
+
+  async reviewSession(input: { sessionId: string; decision: "approved" | "rejected";
+    reviewedBy: string; note?: string }): Promise<boolean> {
+    await ensureTrainingSchema(); const sql = getDatabase();
+    const note = input.note?.trim().slice(0, 1000) || null;
+    const rows = await sql`UPDATE training_sessions SET status=${input.decision}, reviewed_at=now(),
+      reviewed_by=${input.reviewedBy}, review_note=${note}, updated_at=now()
+      WHERE id=${input.sessionId} AND status='pending_review'
+        AND (${input.decision}='rejected' OR NOT EXISTS (
+          SELECT 1 FROM training_items i WHERE i.session_id=training_sessions.id
+            AND (i.item_type='unknown' OR i.needs_clarification=true OR jsonb_array_length(i.risk_flags) > 0)))
+      RETURNING id` as Array<{ id: string }>;
+    if (rows[0] && input.decision === "approved") {
+      await createKnowledgeChangeSet(input.sessionId, input.reviewedBy);
+    }
+    return Boolean(rows[0]);
   }
 
   async recordOutbound(conversationId: string, content: string, idempotencyKey: string) {

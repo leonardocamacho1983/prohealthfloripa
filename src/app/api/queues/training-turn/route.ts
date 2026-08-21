@@ -1,5 +1,6 @@
 import { handleCallback } from "@vercel/queue";
 
+import { hasAiGatewayCredential } from "@/lib/ai/gateway-auth";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
 import { normalizeBrazilianPhoneNumber } from "@/lib/conversations/phone";
 import { logProcessingEvent } from "@/lib/observability/safe-log";
@@ -14,7 +15,7 @@ export const maxDuration = 60;
 
 export const POST = handleCallback<TrainingQueueMessage>(async (message, metadata) => {
   const apiKey = process.env.ZERNIO_API_KEY;
-  if (!apiKey || !process.env.DATABASE_URL || !process.env.AI_GATEWAY_API_KEY) {
+  if (!apiKey || !process.env.DATABASE_URL || !hasAiGatewayCredential()) {
     throw new Error("Training worker configuration is incomplete");
   }
   const phoneNumber = normalizeBrazilianPhoneNumber(message.phoneNumber);

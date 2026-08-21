@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import styles from "../maintenance/maintenance.module.css";
 
 export function TrainingEnrollmentForm() {
   const router = useRouter();
@@ -32,7 +33,7 @@ export function TrainingEnrollmentForm() {
     }
   }
 
-  return <form onSubmit={submit}>
+  return <form className={styles.trainingForm} onSubmit={submit}>
     <h2>Ativar treinador</h2>
     <p>Vincule uma conversa existente. A partir da próxima mensagem, o contato entrará no modo de treinamento.</p>
     <label>

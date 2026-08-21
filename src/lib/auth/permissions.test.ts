@@ -3,7 +3,8 @@ import test from "node:test";
 import { APP_PERMISSIONS, hasPermission, parseAppRole, type AppRole } from "./permissions.ts";
 import { resolveAppRole } from "./role-resolution.ts";
 
-const handoffPermissions = ["handoff:view", "handoff:assume", "handoff:reply", "handoff:close"] as const;
+const handoffPermissions = ["handoff:view", "handoff:assume", "handoff:reply", "handoff:close",
+  "handoff:transfer", "notifications:test"] as const;
 
 test("owner and admin have every application permission", () => {
   for (const role of ["owner", "admin"] as const) {
@@ -13,7 +14,8 @@ test("owner and admin have every application permission", () => {
 
 test("attendant can operate handoffs but cannot administer users, audit, or catalog", () => {
   for (const permission of handoffPermissions) assert.equal(hasPermission("attendant", permission), true);
-  for (const permission of ["catalog:sync", "users:manage", "audit:view"] as const) {
+  for (const permission of ["catalog:sync", "users:manage", "audit:view", "handoff:force_transfer",
+    "operations:configure"] as const) {
     assert.equal(hasPermission("attendant", permission), false);
   }
 });

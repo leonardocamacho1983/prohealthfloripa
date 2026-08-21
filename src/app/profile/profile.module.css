@@ -1,0 +1,264 @@
+.shell {
+  min-height: 100vh;
+  background: #f4f7f5;
+  color: #183128;
+}
+
+.header {
+  min-height: 84px;
+  padding: 18px 32px;
+  background: #fff;
+  border-bottom: 1px solid #e1e8e3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.header h1 {
+  margin: 2px 0 0;
+  font-size: 25px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #117a4b;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+}
+
+.nav a {
+  color: #4f6259;
+  text-decoration: none;
+  font-weight: 750;
+  padding: 9px 12px;
+  border-radius: 9px;
+}
+
+.nav a:hover {
+  background: #edf5f0;
+  color: #126a43;
+}
+
+.content {
+  width: min(760px, calc(100% - 32px));
+  margin: 32px auto;
+  display: grid;
+  gap: 20px;
+}
+
+.welcome {
+  padding: 18px 20px;
+  border: 1px solid #b9ddc8;
+  border-radius: 14px;
+  background: #eaf6ee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.welcome strong { color: #145f3d; }
+.welcome p { margin: 4px 0 0; color: #527064; font-size: 14px; }
+.welcome a { color: #145f3d; font-weight: 800; white-space: nowrap; }
+
+.card {
+  background: #fff;
+  border: 1px solid #e1e8e3;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 4px 16px #1735260a;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.intro {
+  margin: 8px 0 20px;
+  color: #65756d;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.identity {
+  margin: 18px 0 0;
+  display: grid;
+  gap: 12px;
+}
+
+.identity div {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.identity dt {
+  color: #66766e;
+}
+
+.identity dd {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.form {
+  display: grid;
+  gap: 18px;
+}
+
+.form > label:not(.checkRow) {
+  display: grid;
+  gap: 7px;
+  color: #42544b;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.form input[type="tel"],
+.dayRow input[type="time"] {
+  border: 1px solid #ccd8d0;
+  border-radius: 9px;
+  padding: 11px 12px;
+  background: #fff;
+  color: #20372d;
+  font: inherit;
+}
+
+.checkRow,
+.dayToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #354940;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.checkRow input,
+.dayToggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #147a4c;
+}
+
+.schedule {
+  margin: 0;
+  padding: 18px;
+  border: 1px solid #dfe7e1;
+  border-radius: 12px;
+}
+
+.schedule legend {
+  padding: 0 7px;
+  font-weight: 800;
+}
+
+.dayRow {
+  display: grid;
+  grid-template-columns: 76px minmax(110px, 1fr) auto minmax(110px, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  color: #6a7971;
+  font-size: 13px;
+}
+
+.dayRow input[type="time"] {
+  width: 100%;
+}
+
+.form button,
+.secondaryButton {
+  width: fit-content;
+  border: 0;
+  border-radius: 9px;
+  padding: 11px 15px;
+  background: #147a4c;
+  color: #fff;
+  font-weight: 800;
+  cursor: pointer;
+}
+.notifierHealth { margin-top: 24px; padding-top: 22px; border-top: 1px solid #e1e8e3; }
+.notifierHealth h3 { margin: 0 0 14px; font-size: 16px; }
+.notifierHealth dl { display: grid; gap: 10px; margin: 0 0 18px; }
+.notifierHealth dl div { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 14px; }
+.notifierHealth dt { color: #68786f; }
+.notifierHealth dd { margin: 0; color: #29473a; font-weight: 700; overflow-wrap: anywhere; }
+.readiness { display: grid; gap: 8px; padding: 0; list-style: none; }
+.readiness li { padding: 9px 11px; border-radius: 8px; font-weight: 700; font-size: 13px; }
+.ready { background: #e8f5ed; color: #145f3d; }
+.pending { background: #fff4df; color: #825b16; }
+.presence { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e1e8e3; }
+.pauseForm { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; gap: 9px; align-items: end; }
+.pauseForm label { display: grid; gap: 4px; color: #52665c; font-size: 12px; font-weight: 700; }
+.pauseForm input { min-width: 0; border: 1px solid #ccd8d0; border-radius: 8px; padding: 9px; }
+.presence button { border: 0; border-radius: 9px; padding: 10px 13px; background: #147a4c; color: #fff; font-weight: 800; }
+
+.secondaryButton {
+  background: #e5efe9;
+  color: #155d3d;
+}
+
+.notice,
+.error {
+  margin: 0 0 18px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+
+.notice {
+  background: #e8f5ed;
+  color: #145f3d;
+}
+
+.error {
+  background: #fff0ef;
+  color: #853d37;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 620px) {
+  .header {
+    padding: 16px 20px;
+  }
+
+  .card {
+    padding: 18px;
+  }
+
+  .welcome { align-items: flex-start; flex-direction: column; }
+
+  .identity div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+  .notifierHealth dl div { grid-template-columns: 1fr; gap: 3px; }
+  .pauseForm { grid-template-columns: 1fr; }
+
+  .dayRow {
+    grid-template-columns: 62px 1fr auto 1fr;
+    gap: 6px;
+  }
+}

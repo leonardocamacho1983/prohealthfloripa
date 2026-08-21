@@ -1,6 +1,6 @@
 export type NotificationChannel = "in_app" | "whatsapp";
 export type NotificationSeverity = "info" | "warning" | "critical";
-export type NotificationStatus = "pending" | "sent" | "failed" | "dismissed" | "suppressed" | "resolved";
+export type NotificationStatus = "pending" | "sent" | "failed" | "dismissed" | "suppressed" | "resolved" | "cancelled";
 
 export type NotificationCandidate = {
   type: string;

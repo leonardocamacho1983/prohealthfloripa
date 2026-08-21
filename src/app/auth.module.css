@@ -1,0 +1,182 @@
+.shell {
+  max-width: none;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(340px, 0.88fr) minmax(520px, 1.12fr);
+  background: #f4f7f5;
+  color: #12253f;
+}
+
+.brandPanel {
+  position: relative;
+  min-height: 100vh;
+  padding: clamp(32px, 5vw, 72px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 82% 18%, rgb(35 145 99 / 24%), transparent 34%),
+    linear-gradient(148deg, #12253f 0%, #17374a 58%, #0e4a3b 100%);
+  color: #fff;
+}
+
+.brandPanel::after {
+  content: "";
+  position: absolute;
+  right: -18%;
+  bottom: -20%;
+  width: 70%;
+  aspect-ratio: 1;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 50%;
+  box-shadow: 0 0 0 70px rgb(255 255 255 / 3%), 0 0 0 140px rgb(255 255 255 / 2%);
+}
+
+.brandLink,
+.brandCopy,
+.brandPanel small {
+  position: relative;
+  z-index: 1;
+}
+
+.brandLink {
+  width: fit-content;
+}
+
+.brandLink img {
+  width: min(290px, 75%);
+  height: auto;
+}
+
+.brandCopy {
+  max-width: 520px;
+}
+
+.brandCopy p,
+.formIntro p {
+  margin: 0 0 14px;
+  color: #6ed1a1;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.brandCopy h1 {
+  max-width: 500px;
+  margin: 0 0 20px;
+  font-size: clamp(38px, 5vw, 68px);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+}
+
+.brandCopy span {
+  color: rgb(255 255 255 / 72%);
+  font-size: 17px;
+}
+
+.brandPanel small {
+  color: rgb(255 255 255 / 58%);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.formPanel {
+  width: 100%;
+  min-height: 100vh;
+  padding: clamp(32px, 7vw, 88px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.formIntro,
+.clerkCard,
+.support,
+.mobileBrand {
+  width: min(430px, 100%);
+}
+
+.formIntro {
+  margin-bottom: 22px;
+}
+
+.formIntro p {
+  color: #14784b;
+  margin-bottom: 10px;
+}
+
+.formIntro h2 {
+  margin: 0 0 8px;
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.formIntro span,
+.support {
+  color: #607068;
+  line-height: 1.55;
+}
+
+.clerkCard {
+  display: grid;
+  place-items: center;
+  min-height: 390px;
+}
+
+.clerkCard > div {
+  width: 100%;
+}
+
+.support {
+  margin: 18px 0 0;
+  text-align: center;
+  font-size: 12px;
+}
+
+.mobileBrand {
+  display: none;
+  margin-bottom: 40px;
+}
+
+.mobileBrand img {
+  width: 210px;
+  height: auto;
+}
+
+.shell :where(a, button, input):focus-visible {
+  outline: 3px solid #36a66f;
+  outline-offset: 3px;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    display: block;
+    background: #f7f9f8;
+  }
+
+  .brandPanel {
+    display: none;
+  }
+
+  .formPanel {
+    min-height: 100vh;
+    padding: 32px 20px 48px;
+  }
+
+  .mobileBrand {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brandPanel::after {
+    box-shadow: none;
+  }
+}

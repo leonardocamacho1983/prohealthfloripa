@@ -79,6 +79,30 @@ export const proHealthKnowledge = {
     iceBath: "Banheira de gelo avulsa: R$ 70",
     hotBath: "Banheira quente avulsa: R$ 70",
     contrast: "Contraste de termoterapias: R$ 100",
+    firstExperience: {
+      iceOrHot:
+        "Primeira experiência na banheira de gelo ou quente: 50% de desconto; de R$ 70 por R$ 35",
+      contrast:
+        "Primeira experiência de contraste: 50% de desconto; de R$ 100 por R$ 50",
+      pilatesSequence:
+        "Quando conectada à aula experimental de Pilates, a termoterapia acontece depois da aula. A banheira quente nunca deve ser oferecida antes do Pilates.",
+      preferredBooking:
+        "Priorizar aula experimental e termoterapia em horários consecutivos no mesmo dia, confirmados pela agenda oficial.",
+      alternativeBooking:
+        "Se não houver horário consecutivo, não oferecer um benefício aberto para usar algum dia. Buscar uma data concreta, preferencialmente em até 72 horas, e sair da conversa com o horário encaminhado para confirmação pela equipe ou pela agenda oficial.",
+      preparation:
+        "A pessoa só precisa trazer roupa de banho.",
+      amenities: [
+        "toalhas macias, secas e cheirosas",
+        "chuveiro ou ducha",
+        "secador de cabelo",
+        "cabine individualizada",
+      ],
+      followUp:
+        "Depois da primeira utilização, perguntar como foi a experiência antes de sugerir o próximo passo.",
+      recurringConversion:
+        "Quando houver interesse expresso em criar uma rotina ou histórico objetivo de usos repetidos, apresentar o plano recorrente de termoterapias; não presumir recorrência nem pressionar a contratação.",
+    },
     cryotherapyTraditionalMassage:
       "Crioterapia + massagem tradicional: R$ 300",
     cryotherapySpecialMassage: "Crioterapia + massagem especial: R$ 330",
@@ -221,7 +245,7 @@ export const proHealthKnowledge = {
         "Este é o protocolo interno da PRO HEALTH, não um diagnóstico médico universal. Em caso de dúvida ou condição clínica, encaminhar para avaliação profissional.",
     },
     guidance:
-      "Não diagnosticar, prescrever, prometer alívio nem afirmar aptidão clínica. Dor muscular comum, tensão ou desconforto sem sinal de alarme não impedem a resposta comercial: explique a técnica e diga que o profissional conversa e avalia no início para ajustar ou indicar a opção mais adequada. Encaminhe para avaliação humana quando houver trauma recente, dor súbita ou intensa, perda de força ou sensibilidade, falta de ar, dor no peito, febre, suspeita de trombose, gestação, cirurgia recente, condição médica relevante ou quando a pessoa pedir decisão clínica individual.",
+      "Não diagnosticar, prescrever, prometer alívio nem afirmar aptidão clínica. Diante de dor muscular comum, tensão ou desconforto sem sinal de alarme, acolha a pessoa, apresente opções concretas e explique naturalmente que o profissional ajusta a abordagem no início. Encaminhe para avaliação humana quando houver trauma recente, dor súbita ou intensa, perda de força ou sensibilidade, falta de ar, dor no peito, febre, suspeita de trombose, gestação, cirurgia recente, condição médica relevante ou quando a pessoa pedir decisão clínica individual.",
   },
   purchase: {
     plansUrl:

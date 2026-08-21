@@ -1,21 +1,30 @@
 "use client";
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import type { InboxQuickReply } from "@/lib/inbox/repository";
 import styles from "./handoff.module.css";
 
-export function QuickReplyComposer({ conversationId, quickReplies }: {
+export function QuickReplyComposer({ conversationId, quickReplies, assignmentVersion }: {
   conversationId: string;
   quickReplies: InboxQuickReply[];
+  assignmentVersion: number;
 }) {
   const router = useRouter();
-  const [draft, setDraft] = useState("");
+  const draftKey = `prohealth:reply-draft:${conversationId}`;
+  const [draft, setDraft] = useState(() => typeof window === "undefined"
+    ? "" : sessionStorage.getItem(draftKey) ?? "");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const idempotencyKey = useRef("");
   const inputId = `message-${conversationId}`;
   const errorId = `message-error-${conversationId}`;
+
+  useEffect(() => {
+    if (draft) sessionStorage.setItem(draftKey, draft);
+    else sessionStorage.removeItem(draftKey);
+  }, [draft, draftKey]);
 
   const insertReply = (content: string) => setDraft((current) => current.trim()
     ? `${current.trimEnd()}\n${content}`
@@ -28,9 +37,12 @@ export function QuickReplyComposer({ conversationId, quickReplies }: {
     setPending(true);
     setError("");
     try {
+      const data = new FormData(event.currentTarget);
+      idempotencyKey.current ||= crypto.randomUUID();
+      data.set("idempotencyKey", idempotencyKey.current);
       const response = await fetch(`/api/handoff/${conversationId}/reply`, {
         method: "POST",
-        body: new FormData(event.currentTarget),
+        body: data,
       });
       if (!response.ok) {
         setError(response.status === 409
@@ -41,6 +53,7 @@ export function QuickReplyComposer({ conversationId, quickReplies }: {
         return;
       }
       setDraft("");
+      idempotencyKey.current = "";
       router.refresh();
     } catch {
       setError("Falha de conexão. A mensagem não foi enviada.");
@@ -65,6 +78,7 @@ export function QuickReplyComposer({ conversationId, quickReplies }: {
       </button>)}
     </div> : null}
     <form className={styles.composer} onSubmit={submit} aria-busy={pending}>
+      <input type="hidden" name="expectedAssignmentVersion" value={assignmentVersion} />
       <label htmlFor={inputId} className={styles.srOnly}>Mensagem</label>
       <textarea id={inputId} name="message" required maxLength={1500} placeholder="Escreva uma mensagem…"
         value={draft} disabled={pending} aria-invalid={Boolean(error) || undefined}

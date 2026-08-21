@@ -1,0 +1,41 @@
+.shell { min-height: 100vh; background: #f4f7f5; color: #183128; }
+.header { min-height: 84px; padding: 18px 32px; background: #fff; border-bottom: 1px solid #e1e8e3;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.header p { margin: 0; color: #117a4b; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.header h1 { margin: 2px 0 0; font-size: 25px; }
+.header nav { display: flex; gap: 10px; }
+.header a { padding: 9px 12px; border-radius: 9px; color: #4f6259; font-weight: 750; text-decoration: none; }
+.header a:hover { background: #edf5f0; color: #126a43; }
+.content { width: min(1120px, calc(100% - 40px)); margin: 30px auto; display: grid; gap: 20px; }
+.card { padding: 22px; border: 1px solid #e1e8e3; border-radius: 14px; background: #fff; box-shadow: 0 4px 16px #1735260a; }
+.cardHeader { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 430px); align-items: end; gap: 24px; }
+.card h2 { margin: 0; font-size: 19px; }
+.cardHeader p { margin: 7px 0 0; color: #64756c; font-size: 14px; line-height: 1.5; }
+.createForm { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.settingsForm { display: grid; grid-template-columns: minmax(170px, 1fr) 150px auto; align-items: end; gap: 10px; }
+.settingsForm label { display: grid; gap: 6px; color: #42544b; font-size: 12px; font-weight: 750; }
+.settingsForm .switchLabel { display: flex; flex-direction: row; align-items: center; gap: 8px; min-height: 41px; }
+.settingsForm input[type="checkbox"] { width: 18px; height: 18px; accent-color: #147a4c; }
+.settingsForm input[type="number"] { border: 1px solid #cad6ce; border-radius: 9px; padding: 10px 11px; font: inherit; }
+.settingsForm button { border: 0; border-radius: 9px; padding: 11px 12px; background: #147a4c; color: #fff; font-weight: 800; cursor: pointer; }
+.createForm input, .reasonRow input { min-width: 0; border: 1px solid #cad6ce; border-radius: 9px; padding: 10px 11px; color: #20372d; font: inherit; }
+.createForm button, .reasonRow button { border: 0; border-radius: 9px; padding: 10px 12px; background: #147a4c; color: #fff; font-weight: 800; cursor: pointer; }
+.reasonList { display: grid; gap: 8px; margin-top: 20px; }
+.reasonRow { display: grid; grid-template-columns: minmax(220px, 1fr) 66px auto auto; align-items: center; gap: 9px; }
+.reasonRow .deactivate { border: 1px solid #e1cece; background: #fff; color: #8a3737; }
+.reasonRow .reactivate { border: 1px solid #cce1d3; background: #eef7f1; color: #176743; }
+.active, .inactive { font-size: 11px; font-weight: 800; text-align: center; }
+.active { color: #146a43; } .inactive { color: #7b8580; }
+.notice, .error { margin: 0; padding: 12px 14px; border-radius: 10px; }
+.notice { background: #e8f5ed; color: #145f3d; } .error { background: #fff0ef; color: #853d37; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.shell :where(a, button, input):focus-visible { outline: 3px solid #36a66f; outline-offset: 2px; }
+@media (max-width: 760px) {
+  .header { padding: 16px 18px; align-items: flex-start; }
+  .header nav { overflow-x: auto; }
+  .content { width: min(100% - 24px, 1120px); margin: 18px auto; }
+  .cardHeader { grid-template-columns: 1fr; }
+  .settingsForm { grid-template-columns: 1fr; }
+  .reasonRow { grid-template-columns: minmax(0, 1fr) auto; }
+  .reasonRow span { grid-column: 1 / 2; text-align: left; }
+}
