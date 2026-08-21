@@ -19,6 +19,13 @@ export type WhatsAppReplyPlan = {
     time: string;
     customerAuthorized: boolean;
   } | null;
+  conversationState?: {
+    intent: "social" | "service_discovery" | "service_catalog" | "service_recommendation" | "service_selection" | "scheduling" | "clinical_advice" | "other";
+    selectedService: string | null;
+    selectionConfidence: "none" | "low" | "medium" | "high";
+    missingScheduleFields: Array<"service" | "day" | "time">;
+    nextAction: "answer" | "clarify_goal" | "recommend" | "collect_schedule" | "request_handoff";
+  };
   generationMode?: WhatsAppReplyGenerationMode;
 };
 

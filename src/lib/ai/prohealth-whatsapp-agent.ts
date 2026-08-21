@@ -7,6 +7,7 @@ import { buildProHealthInstructions } from "../knowledge/prohealth-context.ts";
 import type { WhatsAppReplyPlan } from "./reply-generation-fallback.ts";
 import { gatewayProviderOptions, whatsappModelRouting } from "./gateway-routing.ts";
 import { prepareWhatsAppModelMessages } from "./generate-whatsapp-reply.ts";
+import { enforceProHealthConversationProgression } from "./prohealth-conversation-progression.ts";
 import { blockingAgentPolicyIssues, validateResponsePolicy } from "./response-policy-validator.ts";
 
 const outputSchema = jsonSchema<{
@@ -21,10 +22,11 @@ const outputSchema = jsonSchema<{
     time: string;
     customerAuthorized: boolean;
   } | null;
+  conversationState: NonNullable<WhatsAppReplyPlan["conversationState"]>;
 }>({
   type: "object",
   additionalProperties: false,
-  required: ["messages", "answeredTopics", "needsClarification", "handoffRecommended", "operationalAction"],
+  required: ["messages", "answeredTopics", "needsClarification", "handoffRecommended", "operationalAction", "conversationState"],
   properties: {
     messages: { type: "array", minItems: 1, maxItems: 2,
       items: { type: "string", minLength: 1, maxLength: 700 } },
@@ -44,6 +46,18 @@ const outputSchema = jsonSchema<{
           customerAuthorized: { type: "boolean" },
         },
       }, { type: "null" }],
+    },
+    conversationState: {
+      type: "object",
+      additionalProperties: false,
+      required: ["intent", "selectedService", "selectionConfidence", "missingScheduleFields", "nextAction"],
+      properties: {
+        intent: { type: "string", enum: ["social", "service_discovery", "service_catalog", "service_recommendation", "service_selection", "scheduling", "clinical_advice", "other"] },
+        selectedService: { anyOf: [{ type: "string", minLength: 2, maxLength: 100 }, { type: "null" }] },
+        selectionConfidence: { type: "string", enum: ["none", "low", "medium", "high"] },
+        missingScheduleFields: { type: "array", uniqueItems: true, maxItems: 3, items: { type: "string", enum: ["service", "day", "time"] } },
+        nextAction: { type: "string", enum: ["answer", "clarify_goal", "recommend", "collect_schedule", "request_handoff"] },
+      },
     },
   },
 });
@@ -91,6 +105,14 @@ PRINCÍPIO CENTRAL
 - Se a pessoa já informou um horário exato, não pergunte período.
 - Não repita introduções, fatos ou perguntas já respondidas.
 - Use no máximo dois balões; prefira um.
+
+PROGRESSÃO DA CONVERSA
+- Classifique o turno em conversationState antes de redigir. O estado deve refletir o que a pessoa quis dizer, inclusive linguagem informal, abreviações e preferências ditas com hesitação.
+- Uma pergunta ampla como "que tipo de massagem vocês têm?" é service_discovery: agrupe por objetivo, não despeje o catálogo, e faça uma única pergunta sobre o que a pessoa busca. Só use service_catalog quando ela pedir explicitamente a lista completa.
+- Em service_recommendation, recomende no máximo dois serviços. Se a pessoa trouxer um detalhe novo depois da recomendação, use-o para afunilar a orientação e avançar; não repita a mesma comparação nem o mesmo aviso.
+- Frases como "acho que prefiro a relaxante", "pode ser a relaxante" ou "vou nessa" são service_selection com confiança alta quando o referente estiver claro. A escolha não precisa de uma segunda confirmação.
+- Com uma escolha de alta confiança, preencha selectedService, pare de oferecer alternativas e use collect_schedule. Pergunte apenas os campos de agenda ainda ausentes.
+- Exemplo correto: após "acho que prefiro a relaxante", informe os dados confirmados da Relaxante e pergunte diretamente o dia e/ou horário faltante. Não pergunte "você confirma?" e não espere um "sim".
 
 OPERAÇÃO
 - A Nextfit é a fonte operacional oficial. Nunca afirme vaga, agendamento, cancelamento ou reagendamento sem resultado oficial.
@@ -149,9 +171,13 @@ REGRA FINAL DE PRIORIDADE
   });
   const output = result.output;
   const operationalHandoff = Boolean(output.operationalAction?.customerAuthorized);
-  const replyMessages = operationalHandoff
+  const initialReplyMessages = operationalHandoff
     ? [HANDOFF_ACKNOWLEDGEMENT]
     : compactMessages(output.messages);
+  const progressedPlan = operationalHandoff
+    ? { ...output, messages: initialReplyMessages }
+    : enforceProHealthConversationProgression({ ...output, messages: initialReplyMessages });
+  const replyMessages = progressedPlan.messages;
   if (!replyMessages.length) throw new Error("ProHealth agent returned no usable message");
   const previousAssistantMessages = input.context.conversation.recentMessages
     .filter((message) => message.role === "assistant")
@@ -172,7 +198,7 @@ REGRA FINAL DE PRIORIDADE
     });
   }
   return {
-    ...output,
+    ...progressedPlan,
     messages: replyMessages,
     handoffRecommended: operationalHandoff,
     handoffValidated: operationalHandoff,
