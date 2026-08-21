@@ -33,6 +33,22 @@ test("recognizes common informal claims of a completed booking", () => {
   }
 });
 
+test("blocks claims that an operational request was already persisted", () => {
+  for (const message of [
+    "Já deixei o pedido para a equipe verificar.",
+    "Encaminhei sua solicitação para a equipe.",
+    "Avisei a equipe e registrei o horário.",
+  ]) {
+    const validation = validateResponsePolicy({ messages: [message] });
+    assert.equal(validation.issues.some((issue) => issue.code === "false_operational_completion"), true, message);
+    assert.equal(blockingAgentPolicyIssues(validation)
+      .some((issue) => issue.code === "false_operational_completion"), true, message);
+  }
+  assert.equal(validateResponsePolicy({
+    messages: ["Vou encaminhar o pedido para a equipe verificar a agenda e confirmar."],
+  }).valid, true);
+});
+
 test("rejects repeated commercial facts unless the caller explicitly allows them", () => {
   const previous = ["A Relaxante custa R$ 270 e dura 1 hora."];
   const messages = ["O valor é R$ 270 e a sessão ocupa uma hora completa."];

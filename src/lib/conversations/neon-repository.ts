@@ -552,6 +552,38 @@ export class NeonConversationRepository implements ConversationRepository, Conve
     return Boolean(rows[0]);
   }
 
+  async returnToAgent(input: { conversationId: string; actorUserId: string; actorLabel: string }): Promise<void> {
+    await Promise.all([ensureRuntimeSchema(), ensureReasonSchema(), ensureConversationWorkflowSchema()]);
+    const sql = getDatabase();
+    const rows = await sql`WITH returned AS (
+      UPDATE conversations SET status='active', handoff_reason=NULL, handoff_source=NULL,
+        handoff_requested_at=NULL, summary=NULL, human_started_at=NULL, human_expires_at=NULL,
+        assigned_attendant_user_id=NULL, awaiting_customer_since=NULL,
+        awaiting_customer_by_user_id=NULL, awaiting_customer_deadline_at=NULL,
+        inactivity_token=NULL, processing_token=NULL, processing_revision=NULL,
+        processing_lease_until=NULL, processed_revision=inbound_revision,
+        next_process_at=NULL, updated_at=now(),
+        assignment_version=assignment_version + 1
+      WHERE id=${input.conversationId} AND status IN ('human_requested','human_active')
+        AND (human_send_token IS NULL OR human_send_lease_until <= now())
+      RETURNING id, contact_id, inbound_revision, processed_revision
+    ), event_inserted AS (
+      INSERT INTO conversation_events (conversation_id, event_type, actor_user_id, actor_label,
+        metadata, idempotency_key)
+      SELECT id, 'returned_to_agent', ${input.actorUserId}, ${input.actorLabel},
+        jsonb_build_object('origin', 'preview_control'),
+        'returned-to-agent:' || id::text || ':' || assignment_version::text
+      FROM returned JOIN conversations USING (id)
+      ON CONFLICT (idempotency_key) DO NOTHING
+    ) SELECT id, contact_id, inbound_revision, processed_revision FROM returned` as Array<{
+      id: string; contact_id: string; inbound_revision: number; processed_revision: number;
+    }>;
+    if (!rows[0]) throw new Error("Conversation cannot be returned to the agent");
+    await sql`INSERT INTO interaction_events (contact_id, event_type, metadata)
+      VALUES (${rows[0].contact_id}, 'returned_to_agent', jsonb_build_object(
+        'conversationId', ${input.conversationId}, 'actorUserId', ${input.actorUserId}))`;
+  }
+
   async markHandoffViewed(conversationId: string, viewerUserId: string) {
     await Promise.all([ensureRuntimeSchema(), ensureReasonSchema()]); const sql = getDatabase();
     await sql`INSERT INTO conversation_views (conversation_id, viewer_user_id, last_viewed_at)

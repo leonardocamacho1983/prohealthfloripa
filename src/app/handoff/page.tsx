@@ -71,6 +71,7 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
   }
   const canOperate = hasPermission(appUser.role, "handoff:reply");
   const canManage = appUser.role === "admin" || appUser.role === "owner";
+  const canReturnToAgent = canManage && process.env.VERCEL_ENV === "preview";
   const params = await searchParams;
   const activeAccount = appUser.email?.trim() || appUser.name?.trim() || "Conta ativa";
   const filter: InboxFilter = allowedFilters.includes(params.filter as InboxFilter)
@@ -283,6 +284,11 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
                 {timeFormatter.format(message.createdAt)}</time>
             </div>)}</div>
             {canOperate ? <div className={styles.actions}>
+              {canReturnToAgent && (selected.status === "human_requested" || selected.status === "human_active")
+                ? <AsyncActionForm action={`/api/handoff/${selected.id}/return-to-agent`}
+                  buttonClassName={styles.secondary} idleLabel="Devolver conversa ao agente"
+                  pendingLabel="Devolvendo…"
+                  confirmMessage="Devolver esta conversa ao atendimento automático?" /> : null}
               {selected.status === "active" && (!selected.assignedAttendantUserId || selected.assignedAttendantUserId === appUser.userId)
                 ? <AsyncActionForm action={`/api/handoff/${selected.id}/assume`}
                 buttonClassName={styles.secondary} idleLabel="Assumir conversa" pendingLabel="Assumindo…" /> : null}

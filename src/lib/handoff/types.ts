@@ -48,6 +48,7 @@ export interface HandoffStore {
   touchHandoff(conversationId: string, actorUserId: string): Promise<void>;
   closeHandoff(input: { conversationId: string; actorUserId: string; actorLabel: string;
     reasonId: string; reasonLabel: string; note?: string }): Promise<void>;
+  returnToAgent?(input: { conversationId: string; actorUserId: string; actorLabel: string }): Promise<void>;
   transferHandoff?(input: { conversationId: string; actorUserId: string; actorLabel: string;
     actorCanForce: boolean; expectedAssignmentVersion: number; targetUserId: string;
     targetLabel: string; reasonId: string; reasonLabel: string; note?: string;

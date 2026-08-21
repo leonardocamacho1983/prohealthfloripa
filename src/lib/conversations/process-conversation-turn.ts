@@ -947,12 +947,19 @@ export async function processConversationTurn(input: {
     if (generationFailed || locallyValidatedHandoff) {
       const reason = generationFailed
         ? "O atendimento automático encontrou uma instabilidade ao preparar a resposta."
-        : "Uma parte do pedido precisa de continuidade com a equipe.";
+        : responsePlan.operationalAction?.type === "request_schedule_confirmation"
+          ? `Cliente autorizou a equipe a verificar ${responsePlan.operationalAction.service}, ${responsePlan.operationalAction.day}, ${responsePlan.operationalAction.time} na agenda oficial.`
+          : "Uma parte do pedido precisa de continuidade com a equipe.";
       const history = await input.repository.getRecentMessages(turn.conversationId, 12);
       const summary = buildHandoffSummary(history, reason);
       await input.repository.requestHandoff({ conversationId: turn.conversationId,
         providerAccountId: turn.accountId, providerConversationId: turn.providerConversationId,
-        reason, source: generationFailed ? "system_failure" : "safety_rule", summary });
+        reason, source: generationFailed
+          ? "system_failure"
+          : responsePlan.operationalAction?.type === "request_schedule_confirmation"
+            ? "customer"
+            : "safety_rule",
+        summary });
       if (input.notifyHandoff) {
         try {
           await input.notifyHandoff({ conversationId: turn.conversationId,

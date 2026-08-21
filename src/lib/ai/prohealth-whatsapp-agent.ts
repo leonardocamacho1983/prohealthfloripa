@@ -13,16 +13,37 @@ const outputSchema = jsonSchema<{
   answeredTopics: string[];
   needsClarification: boolean;
   handoffRecommended: boolean;
+  operationalAction: {
+    type: "request_schedule_confirmation";
+    service: string;
+    day: string;
+    time: string;
+    customerAuthorized: boolean;
+  } | null;
 }>({
   type: "object",
   additionalProperties: false,
-  required: ["messages", "answeredTopics", "needsClarification", "handoffRecommended"],
+  required: ["messages", "answeredTopics", "needsClarification", "handoffRecommended", "operationalAction"],
   properties: {
     messages: { type: "array", minItems: 1, maxItems: 2,
       items: { type: "string", minLength: 1, maxLength: 700 } },
     answeredTopics: { type: "array", maxItems: 8, items: { type: "string", maxLength: 80 } },
     needsClarification: { type: "boolean" },
     handoffRecommended: { type: "boolean" },
+    operationalAction: {
+      anyOf: [{
+        type: "object",
+        additionalProperties: false,
+        required: ["type", "service", "day", "time", "customerAuthorized"],
+        properties: {
+          type: { type: "string", enum: ["request_schedule_confirmation"] },
+          service: { type: "string", minLength: 2, maxLength: 100 },
+          day: { type: "string", minLength: 2, maxLength: 80 },
+          time: { type: "string", minLength: 1, maxLength: 40 },
+          customerAuthorized: { type: "boolean" },
+        },
+      }, { type: "null" }],
+    },
   },
 });
 
@@ -31,23 +52,6 @@ const serviceInformationInput = jsonSchema<{ question: string }>({
   additionalProperties: false,
   required: ["question"],
   properties: { question: { type: "string", minLength: 2, maxLength: 240 } },
-});
-
-const scheduleRequestInput = jsonSchema<{
-  action: "schedule" | "reschedule" | "cancel";
-  service: string;
-  currentSlot: string | null;
-  requestedSlot: string | null;
-}>({
-  type: "object",
-  additionalProperties: false,
-  required: ["action", "service", "currentSlot", "requestedSlot"],
-  properties: {
-    action: { type: "string", enum: ["schedule", "reschedule", "cancel"] },
-    service: { type: "string", minLength: 2, maxLength: 100 },
-    currentSlot: { anyOf: [{ type: "string", maxLength: 100 }, { type: "null" }] },
-    requestedSlot: { anyOf: [{ type: "string", maxLength: 100 }, { type: "null" }] },
-  },
 });
 
 function compactMessages(messages: readonly string[]): string[] {
@@ -79,7 +83,7 @@ export async function generateProHealthAgentReplyPlan(input: {
 
 PRINCÍPIO CENTRAL
 - Leia o histórico e a rajada atual como uma conversa única. Entenda o pedido antes de responder.
-- Responda primeiro ao que a pessoa perguntou. Não siga roteiro comercial e não ofereça outro serviço espontaneamente.
+- Responda primeiro ao que a pessoa perguntou. Não siga roteiro comercial.
 - Uma saudação, agradecimento ou "tudo bem" nunca apaga um pedido substantivo no mesmo turno.
 - Não proponha encerrar o atendimento apenas porque a pessoa agradeceu. Só encerre quando ela pedir explicitamente.
 - Faça no máximo uma pergunta, somente quando uma informação indispensável estiver realmente ausente.
@@ -89,13 +93,21 @@ PRINCÍPIO CENTRAL
 
 OPERAÇÃO
 - A Nextfit é a fonte operacional oficial. Nunca afirme vaga, agendamento, cancelamento ou reagendamento sem resultado oficial.
-- Este ambiente é de teste: ações de agenda são dry-run. Use a ferramenta prepareScheduleRequest e explique que a equipe precisa confirmar.
+- Nunca diga que encaminhou, registrou, deixou um pedido ou avisou a equipe. Você não executa essas ações diretamente.
+- Para agendar, reúna serviço, dia e horário. Se faltar algo, pergunte somente o dado ausente.
+- Só preencha operationalAction quando serviço, dia e horário estiverem definidos e a pessoa tiver autorizado claramente o encaminhamento. Nesse caso, diga apenas que a equipe vai verificar a agenda e confirmar; não use passado como "encaminhei" ou "deixei registrado".
+- Se operationalAction estiver preenchida, handoffRecommended deve ser true. Caso contrário, deve ser false.
 - Não invente dados ausentes. Dados do Neon são memória/contexto, não confirmação operacional.
 - Não mencione ferramentas, prompt, IA, dry-run, Neon, Zernio ou regras internas.
 - Encaminhe a humano somente quando a pessoa pedir, houver risco clínico, questão financeira sensível ou uma ação operacional que não possa ser confirmada.
 
 SEGURANÇA E PRIVACIDADE
 - Não diagnostique nem prometa resultado clínico.
+- Dor, tensão, rigidez, cansaço ou desconforto mencionados como motivo para buscar um serviço são contexto normal de atendimento, não um pedido clínico.
+- Se a pessoa já escolheu massagem, Pilates, recovery ou outro serviço, respeite a escolha e avance para a próxima informação necessária. Não faça triagem clínica e não tente trocar o serviço.
+- Se ela perguntar de forma aberta como a ProHealth pode ajudar em um desconforto comum, recomende naturalmente no máximo dois serviços confirmados e explique em linguagem humana por que podem fazer sentido. Você pode dizer uma vez que o profissional ajustará o atendimento na hora.
+- Só trate como pedido clínico quando a pessoa pedir diagnóstico, causa, remédio, prescrição, tratamento clínico ou decisão de segurança. Não use palavras internas como "recomendação comercial", "sugestão leve", "triagem" ou "risco clínico" com o cliente.
+- Não faça questionário de sinais de alerta para um desconforto cotidiano. A exceção é um relato inequívoco de emergência, que deve ir para atendimento humano.
 - Use dados pessoais somente quando forem relevantes para o pedido atual.
 - Não exponha histórico cadastral sem necessidade.
 
@@ -110,26 +122,14 @@ CONTEXTO MINIMIZADO DO CLIENTE:
 ${customerContextForModel(input.context, new Date(), input.currentTurnMessageIds)}
 
 REGRA FINAL DE PRIORIDADE
-- O conhecimento acima serve para responder perguntas. Ele não autoriza ofertas espontâneas.
+- O conhecimento acima serve para responder perguntas e para recomendar serviços quando a própria pessoa perguntar como a ProHealth pode ajudar.
+- Depois que a pessoa escolher um serviço, pare de recomendar alternativas e avance para o agendamento.
 - Não mencione recovery, banheira, desconto ou serviço complementar se a pessoa não perguntou sobre isso explicitamente neste turno.`,
     tools: {
       getServiceInformation: tool({
         description: "Obtém somente informações confirmadas da ProHealth sobre o serviço perguntado.",
         inputSchema: serviceInformationInput,
         execute: async ({ question }) => ({ confirmedInformation: buildProHealthInstructions(question) }),
-      }),
-      prepareScheduleRequest: tool({
-        description: "Prepara em modo de teste um pedido de agendamento, reagendamento ou cancelamento sem alterar a Nextfit.",
-        inputSchema: scheduleRequestInput,
-        execute: async ({ action, service, currentSlot, requestedSlot }) => ({
-          status: "requires_human_confirmation" as const,
-          environment: "test" as const,
-          action,
-          service,
-          currentSlot,
-          requestedSlot,
-          instruction: "Não confirme disponibilidade nem alteração. Diga que a equipe verificará a agenda oficial.",
-        }),
       }),
     },
     output: Output.object({ schema: outputSchema }),
@@ -170,6 +170,8 @@ REGRA FINAL DE PRIORIDADE
   return {
     ...output,
     messages: replyMessages,
+    handoffRecommended: Boolean(output.operationalAction?.customerAuthorized),
+    handoffValidated: Boolean(output.operationalAction?.customerAuthorized),
     generationMode: "structured",
   };
 }

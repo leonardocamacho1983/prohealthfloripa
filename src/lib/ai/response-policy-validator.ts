@@ -6,6 +6,7 @@ export type ResponsePolicyIssueCode =
   | "bubble_too_long"
   | "too_many_questions"
   | "false_booking_confirmation"
+  | "false_operational_completion"
   | "hot_bath_before_pilates"
   | "robotic_relaxation_language"
   | "internal_language_leak"
@@ -28,6 +29,7 @@ const BLOCKING_AGENT_POLICY_ISSUES = new Set<ResponsePolicyIssueCode>([
   "too_many_bubbles",
   "bubble_too_long",
   "false_booking_confirmation",
+  "false_operational_completion",
   "hot_bath_before_pilates",
   "internal_language_leak",
   "unverified_availability_claim",
@@ -43,6 +45,7 @@ export function blockingAgentPolicyIssues(validation: ResponsePolicyValidation) 
 }
 
 const BOOKING_CONFIRMATION = /\b(?:agendei|reservei|confirmei|marquei)|\b(?:est[aá]|ficou|foi)\s+(?:agendad[oa]|reservad[oa]|confirmad[oa]|marcad[oa])\b|\b(?:j[aá]\s+)?deixei\s+marcad[oa]\b|\b(?:hor[aá]rio|vaga)\s+(?:est[aá]\s+)?garantid[oa]\b|\bj[aá]\s+est[aá]\s+na\s+agenda\b/i;
+const OPERATIONAL_COMPLETION = /\b(?:j[aá]\s+)?(?:encaminhei|registrei|anotei|avisei|acion(?:ei|amos)|enviei)\b|\b(?:j[aá]\s+)?deixei\b[^.!?]{0,80}\b(?:pedido|solicita[cç][aã]o|equipe|agenda|registrad[oa])\b/i;
 const HOT_BEFORE_PILATES = /banheira\s+quente[^.!?]{0,80}\bantes\b[^.!?]{0,40}\bpilates\b|\bantes\b[^.!?]{0,80}banheira\s+quente/i;
 
 const FACT_PATTERNS = {
@@ -73,6 +76,9 @@ export function validateResponsePolicy(input: {
   }
   if (BOOKING_CONFIRMATION.test(text) && !/n[aã]o\s+(?:est[aá]|foi|ficou)\s+(?:agendad|reservad|confirmad)/i.test(text)) {
     issues.push({ code: "false_booking_confirmation", detail: "A resposta afirma uma reserva sem confirmação oficial." });
+  }
+  if (OPERATIONAL_COMPLETION.test(text)) {
+    issues.push({ code: "false_operational_completion", detail: "A resposta afirma uma ação operacional que o agente não executou." });
   }
   if (input.semanticPlan?.scheduling.time
     && /(?:qual|que)\s+per[ií]odo|manh[aã],?\s+(?:à|a)\s+tarde\s+ou\s+(?:à|a)\s+noite/i.test(text)) {

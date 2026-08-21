@@ -717,23 +717,25 @@ test("journey-assisted replies are blocked when the model invents a booking conf
   assert.doesNotMatch(provider.sent[0] ?? "", /marcado|agendado/i);
 });
 
-test("a locally validated partial fallback opens handoff after preserving the known answer", async () => {
-  const repository = new TurnRepository(["Quero massagem e tenho outra dúvida sobre meu contrato"]);
+test("a structured schedule request opens handoff only after explicit authorization and complete details", async () => {
+  const repository = new TurnRepository(["Quero massagem Relaxante amanhã às 14h. Pode encaminhar."]);
   const provider = new TurnProvider();
 
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
     repository, provider, generateReply: async () => ({
-      messages: ["A massagem custa R$ 270.",
-        "Também registrei a dúvida do contrato para nossa equipe continuar sem você repetir."],
-      answeredTopics: ["massagem"],
+      messages: ["Perfeito. A equipe vai verificar a agenda de amanhã às 14h e confirmar por aqui."],
+      answeredTopics: ["agendamento"],
       needsClarification: false,
       handoffRecommended: true,
       handoffValidated: true,
+      operationalAction: { type: "request_schedule_confirmation", service: "Relaxante",
+        day: "amanhã", time: "14h", customerAuthorized: true },
     }) });
 
   assert.equal(result, "handoff_requested");
   assert.equal(repository.handoffRequested, true);
-  assert.equal(provider.sent.length, 2);
+  assert.equal(repository.handoffSource, "customer");
+  assert.equal(provider.sent.length, 1);
 });
 
 test("active journey presents Relaxante facts and the post-Pilates bath without invoking the model", async () => {

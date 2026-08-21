@@ -12,6 +12,13 @@ export type WhatsAppReplyPlan = {
   needsClarification: boolean;
   handoffRecommended: boolean;
   handoffValidated?: boolean;
+  operationalAction?: {
+    type: "request_schedule_confirmation";
+    service: string;
+    day: string;
+    time: string;
+    customerAuthorized: boolean;
+  } | null;
   generationMode?: WhatsAppReplyGenerationMode;
 };
 
