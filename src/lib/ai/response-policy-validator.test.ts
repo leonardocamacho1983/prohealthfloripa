@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { validateResponsePolicy } from "./response-policy-validator.ts";
+import { blockingAgentPolicyIssues, validateResponsePolicy } from "./response-policy-validator.ts";
 
 test("accepts a concise grounded schedule handoff", () => {
   const result = validateResponsePolicy({ messages: [
@@ -102,4 +102,17 @@ test("semantic plan blocks an early recovery offer and unverified availability",
   });
   assert.equal(validation.issues.some((issue) => issue.code === "premature_optional_offer"), true);
   assert.equal(validation.issues.some((issue) => issue.code === "unverified_availability_claim"), true);
+});
+
+test("agent treats style issues as advisory but still blocks unsafe operational claims", () => {
+  const advisory = validateResponsePolicy({
+    messages: ["Se quiser, posso repetir: a sessão custa R$ 270."],
+    previousAssistantMessages: ["A sessão custa R$ 270."],
+  });
+  assert.deepEqual(blockingAgentPolicyIssues(advisory), []);
+
+  const unsafe = validateResponsePolicy({ messages: ["Marquei sua massagem para hoje."] });
+  assert.deepEqual(blockingAgentPolicyIssues(unsafe).map((issue) => issue.code), [
+    "false_booking_confirmation",
+  ]);
 });

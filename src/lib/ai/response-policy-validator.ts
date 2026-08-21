@@ -23,6 +23,25 @@ export type ResponsePolicyValidation = {
   issues: Array<{ code: ResponsePolicyIssueCode; detail: string }>;
 };
 
+const BLOCKING_AGENT_POLICY_ISSUES = new Set<ResponsePolicyIssueCode>([
+  "empty",
+  "too_many_bubbles",
+  "bubble_too_long",
+  "false_booking_confirmation",
+  "hot_bath_before_pilates",
+  "internal_language_leak",
+  "unverified_availability_claim",
+]);
+
+/**
+ * The conversational agent may sound imperfect without becoming unsafe.
+ * Only claims that can mislead the customer, leak internals, or violate a
+ * service rule should replace an otherwise useful AI response.
+ */
+export function blockingAgentPolicyIssues(validation: ResponsePolicyValidation) {
+  return validation.issues.filter((issue) => BLOCKING_AGENT_POLICY_ISSUES.has(issue.code));
+}
+
 const BOOKING_CONFIRMATION = /\b(?:agendei|reservei|confirmei|marquei)|\b(?:est[aá]|ficou|foi)\s+(?:agendad[oa]|reservad[oa]|confirmad[oa]|marcad[oa])\b|\b(?:j[aá]\s+)?deixei\s+marcad[oa]\b|\b(?:hor[aá]rio|vaga)\s+(?:est[aá]\s+)?garantid[oa]\b|\bj[aá]\s+est[aá]\s+na\s+agenda\b/i;
 const HOT_BEFORE_PILATES = /banheira\s+quente[^.!?]{0,80}\bantes\b[^.!?]{0,40}\bpilates\b|\bantes\b[^.!?]{0,80}banheira\s+quente/i;
 

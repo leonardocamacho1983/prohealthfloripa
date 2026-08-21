@@ -6,7 +6,7 @@ import { buildProHealthInstructions } from "../knowledge/prohealth-context.ts";
 import type { WhatsAppReplyPlan } from "./reply-generation-fallback.ts";
 import { gatewayProviderOptions, whatsappModelRouting } from "./gateway-routing.ts";
 import { prepareWhatsAppModelMessages } from "./generate-whatsapp-reply.ts";
-import { validateResponsePolicy } from "./response-policy-validator.ts";
+import { blockingAgentPolicyIssues, validateResponsePolicy } from "./response-policy-validator.ts";
 
 const outputSchema = jsonSchema<{
   messages: string[];
@@ -156,10 +156,16 @@ REGRA FINAL DE PRIORIDADE
     messages: replyMessages,
     previousAssistantMessages,
   });
-  if (!validation.valid) {
-    const error = new Error(`ProHealth agent response blocked: ${validation.issues.map((issue) => issue.code).join(",")}`);
+  const blockingIssues = blockingAgentPolicyIssues(validation);
+  if (blockingIssues.length) {
+    const error = new Error(`ProHealth agent response blocked: ${blockingIssues.map((issue) => issue.code).join(",")}`);
     error.name = "ProHealthAgentPolicyError";
     throw error;
+  }
+  if (validation.issues.length) {
+    console.info("ProHealth agent response accepted with advisory policy issues", {
+      issues: validation.issues.map((issue) => issue.code),
+    });
   }
   return {
     ...output,
