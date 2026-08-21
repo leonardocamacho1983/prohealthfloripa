@@ -71,3 +71,35 @@ test("blocks internal operational language from reaching the customer", () => {
     messages: ["Entendi. Vamos encontrar a opção que combina melhor com o que você busca."],
   }).valid, true);
 });
+
+test("semantic plan blocks asking for period after an exact hour", () => {
+  const validation = validateResponsePolicy({
+    messages: ["Você prefere de manhã, à tarde ou à noite?"],
+    semanticPlan: {
+      primaryIntent: "scheduling", conversationAct: "continuation",
+      requestedService: { family: "pilates", explicit: true },
+      scheduling: { requested: true, dayText: "hoje", period: "afternoon", time: "14:00" },
+      factsAlreadyProvided: ["service", "day", "time"], factsNeeded: [], unresolvedQuestions: [],
+      nextAction: "check_availability", acknowledgeGreeting: false, confidence: "high",
+    },
+  });
+  assert.equal(validation.issues.some((issue) => issue.code === "asks_known_schedule_field"), true);
+});
+
+test("semantic plan blocks an early recovery offer and unverified availability", () => {
+  const semanticPlan = {
+    primaryIntent: "scheduling" as const, conversationAct: "continuation" as const,
+    requestedService: { family: "pilates" as const, explicit: true },
+    scheduling: { requested: true, dayText: "hoje", period: "afternoon" as const, time: "14:00" },
+    factsAlreadyProvided: ["service", "day", "time"], factsNeeded: [], unresolvedQuestions: [],
+    nextAction: "check_availability" as const,
+    optionalOffer: { id: "hot_bath" as const, appropriateNow: false, reason: "pedido principal pendente" },
+    acknowledgeGreeting: false, confidence: "high" as const,
+  };
+  const validation = validateResponsePolicy({
+    messages: ["Às 14h hoje funciona. Depois você pode fazer recovery na banheira quente."],
+    semanticPlan,
+  });
+  assert.equal(validation.issues.some((issue) => issue.code === "premature_optional_offer"), true);
+  assert.equal(validation.issues.some((issue) => issue.code === "unverified_availability_claim"), true);
+});

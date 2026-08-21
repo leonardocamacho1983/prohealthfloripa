@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { generateWhatsAppReplyPlan } from "@/lib/ai/generate-whatsapp-reply";
 import { hasAiGatewayCredential } from "@/lib/ai/gateway-auth";
 import { interpretSemanticTurn } from "@/lib/ai/semantic-turn-interpreter";
+import { planSemanticTurn } from "@/lib/ai/semantic-turn-planner";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
 import {
   EmptyTurnInvariantError,
@@ -135,6 +136,7 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
       observedRevision: message.observedRevision, repository, provider,
       generateReply: generateWhatsAppReplyPlan,
       interpretTurn: interpretSemanticTurn,
+      planSemanticTurn,
       preSendGraceMs: 300,
       observeJourney: recordJourneyTurn,
       ...(nextfitApiKey ? { enrichCustomer: createNextfitEnricher({ api: new NextfitClient(nextfitApiKey),

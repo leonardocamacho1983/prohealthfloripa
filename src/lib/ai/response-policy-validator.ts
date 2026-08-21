@@ -1,3 +1,5 @@
+import type { SemanticTurnPlan } from "./semantic-turn-plan.ts";
+
 export type ResponsePolicyIssueCode =
   | "empty"
   | "too_many_bubbles"
@@ -11,7 +13,10 @@ export type ResponsePolicyIssueCode =
   | "repeated_safety_screen"
   | "repeated_professional_disclaimer"
   | "address_permission_gate"
-  | "repeated_fact";
+  | "repeated_fact"
+  | "asks_known_schedule_field"
+  | "premature_optional_offer"
+  | "unverified_availability_claim";
 
 export type ResponsePolicyValidation = {
   valid: boolean;
@@ -33,6 +38,7 @@ export function validateResponsePolicy(input: {
   allowRepeatedFacts?: readonly (keyof typeof FACT_PATTERNS)[];
   safetyStatus?: "not_asked" | "asked" | "cleared" | "flagged";
   professionalAdjustmentMentioned?: boolean;
+  semanticPlan?: SemanticTurnPlan;
 }): ResponsePolicyValidation {
   const issues: ResponsePolicyValidation["issues"] = [];
   const messages = input.messages.map((message) => message.trim()).filter(Boolean);
@@ -48,6 +54,19 @@ export function validateResponsePolicy(input: {
   }
   if (BOOKING_CONFIRMATION.test(text) && !/n[aã]o\s+(?:est[aá]|foi|ficou)\s+(?:agendad|reservad|confirmad)/i.test(text)) {
     issues.push({ code: "false_booking_confirmation", detail: "A resposta afirma uma reserva sem confirmação oficial." });
+  }
+  if (input.semanticPlan?.scheduling.time
+    && /(?:qual|que)\s+per[ií]odo|manh[aã],?\s+(?:à|a)\s+tarde\s+ou\s+(?:à|a)\s+noite/i.test(text)) {
+    issues.push({ code: "asks_known_schedule_field", detail: "A resposta pede período apesar de já existir horário exato." });
+  }
+  if (input.semanticPlan?.optionalOffer?.appropriateNow === false
+    && /\b(?:banheira|recovery|termoterapia|contraste)\b/i.test(text)) {
+    issues.push({ code: "premature_optional_offer", detail: "A resposta introduz uma oferta opcional antes de resolver o pedido principal." });
+  }
+  if (input.semanticPlan?.nextAction === "check_availability"
+    && /\b(?:às?\s*)?\d{1,2}(?::\d{2}|h)?\s+(?:hoje\s+)?(?:funciona|est[aá]\s+(?:livre|dispon[ií]vel))\b|\btemos\s+(?:vaga|hor[aá]rio)\b/i.test(text)
+    && !/confirmar\s+(?:a\s+)?disponibilidade|ainda\s+n[aã]o\s+(?:est[aá]|foi)\s+confirmad/i.test(text)) {
+    issues.push({ code: "unverified_availability_claim", detail: "A resposta trata uma preferência como disponibilidade confirmada." });
   }
   if (HOT_BEFORE_PILATES.test(text)) {
     issues.push({ code: "hot_bath_before_pilates", detail: "A banheira quente não pode ser oferecida antes do Pilates." });

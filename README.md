@@ -29,6 +29,7 @@ Crie um `.env.local` a partir do `.env.example` e preencha localmente:
 - `APP_URL`: URL pública da aplicação, por exemplo `https://prohealthfloripa.vercel.app`.
 - `CRON_SECRET`: segredo forte usado pela Vercel para autenticar as rotinas de catálogo e início de turno.
 - `JOURNEY_ENGINE_MODE`: opcional; aceita `off`, `shadow` ou `active`. Sem valor explícito, previews e desenvolvimento usam `active`, enquanto produção usa `shadow` para observar a nova jornada sem alterar a resposta enviada.
+- `SEMANTIC_PLANNER_MODE`: opcional; aceita `off`, `shadow` ou `active`. Em `shadow`, registra o plano sem alterar a precedência atual; em `active`, o plano semântico e o gerador natural respondem antes dos templates da jornada. O padrão é `active` em Preview/desenvolvimento e `shadow` em produção.
 
 ## Verificação
 

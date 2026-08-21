@@ -22,6 +22,7 @@ import {
 } from "./reply-generation-fallback.ts";
 import { gatewayProviderOptions, whatsappModelRouting } from "./gateway-routing.ts";
 import { ensureDeterministicReplyCoverage } from "./reply-coverage.ts";
+import type { SemanticTurnPlan } from "./semantic-turn-plan.ts";
 
 export type { WhatsAppReplyPlan } from "./reply-generation-fallback.ts";
 
@@ -142,6 +143,7 @@ export async function generateWhatsAppReplyPlan(input: {
   context: CustomerContext;
   repairRequested?: boolean;
   currentTurnMessageIds?: readonly string[];
+  semanticPlan?: SemanticTurnPlan;
 }): Promise<WhatsAppReplyPlan> {
   const currentTurnMessageIds = new Set(input.currentTurnMessageIds ?? []);
   const { priorMessages, messages } = prepareWhatsAppModelMessages({
@@ -211,7 +213,14 @@ REGRAS DO TURNO ATUAL:
 - Mencione que o profissional ajusta a abordagem no máximo uma vez por conversa, salvo se o cliente perguntar sobre segurança ou avaliação.
 - Nunca pergunte se a pessoa quer o endereço. Quando for útil para um visitante, informe diretamente o endereço confirmado no contexto.
 - Depois de uma resposta curta como "sim" ou "quero sim", cumpra a pergunta ou promessa imediatamente usando a última fala do agente como contexto.
+- O PLANO SEMÂNTICO abaixo orienta significado e próxima ação, mas não comprova fatos nem disponibilidade.
+- Responda primeiro ao pedido principal. Só inclua oferta opcional quando appropriateNow=true.
+- Se nextAction=check_availability, não diga que o horário funciona ou está disponível: informe que o pedido será confirmado pela equipe ou pela integração oficial.
+- Nunca peça período quando o plano já contém horário exato.
 ${repairRequested ? "- Houve sinal de reparo: reconheça o erro em uma frase, corrija o fato confirmado e avance; não defenda a resposta anterior." : ""}
+
+PLANO SEMÂNTICO VALIDADO:
+${input.semanticPlan ? JSON.stringify(input.semanticPlan) : "indisponível; interprete o turno com cautela"}
 
 ${massageAnalysis.grounding ?? ""}
 

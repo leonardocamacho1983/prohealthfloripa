@@ -712,6 +712,54 @@ test("active journey presents Relaxante facts and the post-Pilates bath without 
   assert.equal(repository.journeyState?.offers.hot_bath, "offered");
 });
 
+test("active semantic planner owns a Pilates burst and preserves the exact 14h request", async () => {
+  const repository = new JourneyTurnRepository([
+    "Oi bom dia tudo bem?",
+    "Vcs tem aula experimental de pilates?",
+    "pode ser hj às 14?",
+  ]);
+  const provider = new TurnProvider();
+  let receivedPlan: import("../ai/semantic-turn-plan.ts").SemanticTurnPlan | undefined;
+
+  const semanticPlan: import("../ai/semantic-turn-plan.ts").SemanticTurnPlan = {
+    primaryIntent: "scheduling",
+    conversationAct: "new_request",
+    requestedService: { family: "pilates", name: "aula experimental", explicit: true },
+    scheduling: { requested: true, dayText: "hoje", period: "afternoon", time: "14:00" },
+    factsAlreadyProvided: ["service", "day", "time"],
+    factsNeeded: [],
+    unresolvedQuestions: [],
+    nextAction: "check_availability",
+    acknowledgeGreeting: true,
+    confidence: "high",
+  };
+
+  const result = await processConversationTurn({
+    conversationId: "conversation",
+    observedRevision: 3,
+    repository,
+    provider,
+    journeyMode: "active",
+    semanticPlannerMode: "active",
+    planSemanticTurn: async () => semanticPlan,
+    generateReply: async (input) => {
+      receivedPlan = input.semanticPlan;
+      return {
+        messages: ["Oi, bom dia! Temos aula experimental de Pilates gratuita. Vou encaminhar seu pedido de hoje às 14h para a equipe confirmar a disponibilidade."],
+        answeredTopics: ["pilates", "scheduling"],
+        needsClarification: false,
+        handoffRecommended: false,
+      };
+    },
+  });
+
+  assert.equal(result, "replied");
+  assert.deepEqual(receivedPlan, semanticPlan);
+  assert.equal(provider.sent.length, 1);
+  assert.doesNotMatch(provider.sent[0] ?? "", /qual per[ií]odo|recovery|banheira/i);
+  assert.match(provider.sent[0] ?? "", /confirmar a disponibilidade/i);
+});
+
 test("the original sandbox Relaxante request advances commercially without robotic repetition", async () => {
   const repository = new JourneyTurnRepository([
     "Eu estou me sentindo tenso, com dificuldade de relaxar. Quero ver a massagem relaxante",

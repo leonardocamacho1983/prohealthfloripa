@@ -34,6 +34,9 @@ import type {
   JourneyAction,
 } from "../journey/types.ts";
 import type { SemanticTurnInterpretation } from "../ai/semantic-turn-interpreter.ts";
+import type { SemanticTurnPlan } from "../ai/semantic-turn-plan.ts";
+import { validateSemanticTurnPlan } from "../ai/semantic-turn-plan.ts";
+import { semanticPlannerMode, type SemanticPlannerMode } from "../ai/semantic-planner-mode.ts";
 import { AUTOMATIC_CLOSURE_CONFIRMATION, buildSocialReply, hasAssistantGreetingAcknowledgement,
   isClosureConsent, prependGreetingAcknowledgement } from "./social-message.ts";
 import { applyEpisodeBoundaryToHistory } from "./episode-boundary.ts";
@@ -63,6 +66,7 @@ export type JourneyTurnObservation = {
 
 type EnrichCustomer = (input: { identity: ConversationIdentity; phoneNumber: string; message: string }) => Promise<ConversationIdentity>;
 type InterpretTurn = (input: { message: string }) => Promise<SemanticTurnInterpretation>;
+type PlanSemanticTurn = (input: { currentTurn: string; history: readonly ConversationMessage[] }) => Promise<SemanticTurnPlan>;
 
 export class EmptyTurnInvariantError extends Error {
   readonly conversationId: string;
@@ -131,6 +135,9 @@ const BLOCKING_ASSISTED_POLICY_ISSUES = new Set([
   "repeated_safety_screen",
   "repeated_professional_disclaimer",
   "address_permission_gate",
+  "asks_known_schedule_field",
+  "premature_optional_offer",
+  "unverified_availability_claim",
 ]);
 
 type JourneyCapableRepository = ConversationTurnRepository & HandoffStore & ConversationJourneyStateStore;
@@ -279,17 +286,20 @@ export async function processConversationTurn(input: {
   repository: ConversationTurnRepository & HandoffStore;
   provider: WhatsAppProvider;
   generateReply: (input: { message: string; context: CustomerContext; repairRequested?: boolean;
-    currentTurnMessageIds?: readonly string[] }) => Promise<WhatsAppReplyPlan>;
+    currentTurnMessageIds?: readonly string[]; semanticPlan?: SemanticTurnPlan }) => Promise<WhatsAppReplyPlan>;
   enrichCustomer?: EnrichCustomer;
   interpretTurn?: InterpretTurn;
+  planSemanticTurn?: PlanSemanticTurn;
   notifyHandoff?: (input: { conversationId: string; firstName?: string; reason: string; summary: string;
     idempotencyKey: string; accountId: string }) => Promise<void>;
   preSendGraceMs?: number;
   journeyMode?: JourneyEngineMode;
+  semanticPlannerMode?: SemanticPlannerMode;
   observeJourney?: (observation: JourneyTurnObservation) => Promise<void> | void;
 }): Promise<TurnProcessingResult> {
   const processingStartedAt = Date.now();
   const resolvedJourneyMode = input.journeyMode ?? journeyEngineMode();
+  const resolvedSemanticPlannerMode = input.semanticPlannerMode ?? semanticPlannerMode();
   const journeyRepository = resolvedJourneyMode !== "off" && isJourneyCapableRepository(input.repository)
     ? input.repository
     : undefined;
@@ -546,6 +556,24 @@ export async function processConversationTurn(input: {
     let replySource: "social" | "model" | "deterministic_journey" = "model";
     let journeyPlanningMs: number | undefined;
     let previouslyDeliveredScheduleSummary: ConversationMessage | undefined;
+    let semanticPlan: SemanticTurnPlan | undefined;
+    let semanticPlanIssues: string[] = [];
+
+    if (!plan.socialKind && input.planSemanticTurn && resolvedSemanticPlannerMode !== "off") {
+      try {
+        semanticPlan = await input.planSemanticTurn({
+          currentTurn: plan.consolidatedMessage,
+          history: activeMessages.filter((message) => !currentIds.has(message.id)),
+        });
+        semanticPlanIssues = validateSemanticTurnPlan(semanticPlan);
+        if (semanticPlanIssues.length > 0) semanticPlan = undefined;
+      } catch (error) {
+        console.warn("Semantic turn planning failed", {
+          error: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
+    }
+    const semanticPlannerControlsReply = resolvedSemanticPlannerMode === "active" && Boolean(semanticPlan);
 
     if (journeyRepository && !plan.socialKind) {
       const planningStartedAt = Date.now();
@@ -594,6 +622,7 @@ export async function processConversationTurn(input: {
         .join("\n");
       const resetOnly = plan.resetRequested && semanticMessages.length === 0;
       if (decision.action.type === "assisted" && input.interpretTurn && semanticTurnText
+        && !semanticPlannerControlsReply
         && observedState.dialogue.latestIntent !== "service_question"
         && !needsNextfitEnrichment(semanticTurnText)
         && !shouldLoadNextfitCatalogContext(semanticTurnText)) {
@@ -644,7 +673,7 @@ export async function processConversationTurn(input: {
           previousAssistantMessages: priorAssistantMessages,
         });
         journeyValidationIssues = validation.issues.map((issue) => issue.code);
-        if (activeJourney && validation.valid) {
+        if (activeJourney && (resetOnly || !semanticPlannerControlsReply) && validation.valid) {
           responsePlan = candidateReply;
           deliveredJourneyAction = resetOnly
             ? { type: "assisted", reason: "Reinício conversacional confirmado." }
@@ -673,7 +702,8 @@ export async function processConversationTurn(input: {
       try {
         responsePlan = await input.generateReply({ message: plan.consolidatedMessage, context,
           repairRequested: plan.repairRequested,
-          currentTurnMessageIds: plan.messages.map((message) => message.id) });
+          currentTurnMessageIds: plan.messages.map((message) => message.id),
+          ...(semanticPlannerControlsReply && semanticPlan ? { semanticPlan } : {}) });
         if (journeyRepository) {
           if (journeyStateBeforeDelivery) {
             responsePlan = {
@@ -692,6 +722,7 @@ export async function processConversationTurn(input: {
           const assistedValidation = validateResponsePolicy({
             messages: responsePlan.messages,
             previousAssistantMessages: priorAssistantMessages,
+            ...(semanticPlan ? { semanticPlan } : {}),
             safetyStatus: journeyStateBeforeDelivery?.dialogue.safetyStatus,
             professionalAdjustmentMentioned: Boolean(
               journeyStateBeforeDelivery?.dialogue.professionalAdjustmentMentioned,
@@ -798,6 +829,18 @@ export async function processConversationTurn(input: {
         serviceFamily: semanticInterpretation.serviceFamily ?? null,
         confidence: semanticInterpretation.confidence,
       } : null,
+      semanticPlan: semanticPlan ? {
+        mode: resolvedSemanticPlannerMode,
+        primaryIntent: semanticPlan.primaryIntent,
+        conversationAct: semanticPlan.conversationAct,
+        nextAction: semanticPlan.nextAction,
+        serviceFamily: semanticPlan.requestedService?.family ?? null,
+        hasDay: Boolean(semanticPlan.scheduling.dayText),
+        hasTime: Boolean(semanticPlan.scheduling.time),
+        optionalOfferAppropriate: semanticPlan.optionalOffer?.appropriateNow ?? false,
+        confidence: semanticPlan.confidence,
+      } : null,
+      semanticPlanIssues,
       episodeBoundary: episode.boundary.startsNewEpisode ? episode.boundary.reason : null,
       ...(journeyRepository ? {
         journey: {
