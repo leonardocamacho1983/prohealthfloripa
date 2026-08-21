@@ -5,7 +5,8 @@ import type { CustomerContext } from "../customer-context/index.ts";
 import type { HandoffStore } from "../handoff/types.ts";
 import { initialJourneyState, type ConversationJourneyState } from "../journey/types.ts";
 import type { WhatsAppProvider } from "../whatsapp/provider.ts";
-import { EmptyTurnInvariantError, processConversationTurn } from "./process-conversation-turn.ts";
+import { EmptyTurnInvariantError, prepareReplyMessages,
+  processConversationTurn } from "./process-conversation-turn.ts";
 import type { ConversationIdentity, ConversationMessage, ConversationTurnRepository,
   CompleteJourneyHandoffInput, CustomerProfile, OutboundReservation, TurnAcquisition,
   TurnCompletionState } from "./types.ts";
@@ -182,6 +183,63 @@ class JourneyTurnRepository extends TurnRepository {
     return true;
   }
 }
+
+test("reply preparation removes equivalent duplicate bubbles before applying the limit", () => {
+  assert.deepEqual(prepareReplyMessages([
+    "  Oi, bom dia!  Tudo ótimo por aqui. ",
+    "oi,  BOM DIA! Tudo ótimo por aqui .",
+    "Qual dia funciona melhor para você?",
+  ]), {
+    messages: [
+      "Oi, bom dia! Tudo ótimo por aqui.",
+      "Qual dia funciona melhor para você?",
+    ],
+    duplicateCount: 1,
+  });
+});
+
+test("a duplicated AI bubble is sent only once", async () => {
+  const repository = new TurnRepository(["Quero marcar uma massagem relaxante"]);
+  const provider = new TurnProvider();
+  const repeated = "A Relaxante dura uma hora e custa R$ 270. Você quer incluir a banheira?";
+
+  const result = await processConversationTurn({
+    conversationId: "conversation",
+    observedRevision: 1,
+    repository,
+    provider,
+    generateReply: async () => ({
+      messages: [repeated, `  ${repeated.toLocaleLowerCase("pt-BR")}  `],
+      answeredTopics: ["massagem"],
+      needsClarification: false,
+      handoffRecommended: false,
+    }),
+  });
+
+  assert.equal(result, "replied");
+  assert.deepEqual(provider.sent, [repeated]);
+});
+
+test("two distinct AI bubbles remain separate", async () => {
+  const repository = new TurnRepository(["Quero marcar uma massagem relaxante"]);
+  const provider = new TurnProvider();
+
+  const result = await processConversationTurn({
+    conversationId: "conversation",
+    observedRevision: 1,
+    repository,
+    provider,
+    generateReply: async () => ({
+      messages: ["A Relaxante dura uma hora.", "O valor avulso é R$ 270."],
+      answeredTopics: ["massagem"],
+      needsClarification: false,
+      handoffRecommended: false,
+    }),
+  });
+
+  assert.equal(result, "replied");
+  assert.deepEqual(provider.sent, ["A Relaxante dura uma hora.", "O valor avulso é R$ 270."]);
+});
 
 class TurnProvider implements WhatsAppProvider {
   sent: string[] = [];

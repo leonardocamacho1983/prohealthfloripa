@@ -22,6 +22,7 @@ import { hasActivePilates } from "../journey/customer-signals.ts";
 import { extractJourneyGoals, extractSelectedService } from "../journey/extractors.ts";
 import { journeyEngineMode, type JourneyEngineMode } from "../journey/mode.ts";
 import { decideJourneyAction } from "../journey/policy.ts";
+import { logProcessingEvent } from "../observability/safe-log.ts";
 import {
   applyDeliveredJourneyOutcome,
   applySemanticJourneyEvidence,
@@ -81,6 +82,42 @@ const GENERATION_FAILURE_REPLY =
   "Recebi sua mensagem, mas tive uma instabilidade para concluir a resposta. Já deixei tudo registrado para nossa equipe continuar por aqui sem você precisar repetir.";
 const MODEL_POLICY_FALLBACK_REPLY =
   "Quero te responder com precisão. Vou encaminhar essa parte para a equipe continuar por aqui, sem você precisar repetir.";
+
+function normalizeReplyBubble(message: string): string {
+  return message
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1");
+}
+
+function replyBubbleDedupeKey(message: string): string {
+  return normalizeReplyBubble(message).toLocaleLowerCase("pt-BR");
+}
+
+export function prepareReplyMessages(messages: string[], limit = 2): {
+  messages: string[];
+  duplicateCount: number;
+} {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  let duplicateCount = 0;
+
+  for (const candidate of messages) {
+    const message = normalizeReplyBubble(candidate);
+    if (!message) continue;
+    const key = replyBubbleDedupeKey(message);
+    if (seen.has(key)) {
+      duplicateCount += 1;
+      continue;
+    }
+    seen.add(key);
+    unique.push(message);
+    if (unique.length >= limit) break;
+  }
+
+  return { messages: unique, duplicateCount };
+}
 
 const BLOCKING_ASSISTED_POLICY_ISSUES = new Set([
   "empty",
@@ -703,7 +740,15 @@ export async function processConversationTurn(input: {
           : message),
       };
     }
-    const messages = responsePlan.messages.map((message) => message.trim()).filter(Boolean).slice(0, 2);
+    const preparedMessages = prepareReplyMessages(responsePlan.messages);
+    const messages = preparedMessages.messages;
+    if (preparedMessages.duplicateCount > 0) {
+      logProcessingEvent("info", {
+        event: "Duplicate AI reply bubble dropped",
+        conversationId: turn.conversationId,
+        result: `revision:${turn.revision};duplicates:${preparedMessages.duplicateCount}`,
+      });
+    }
     if (!messages.length) throw new Error("Empty response plan");
     if ((input.preSendGraceMs ?? 0) > 0) {
       await new Promise((resolve) => setTimeout(resolve, input.preSendGraceMs));
