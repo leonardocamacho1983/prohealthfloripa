@@ -96,8 +96,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (replyToken) await repository.releaseHumanReply({ conversationId: id, token: replyToken }).catch(() => undefined);
     await recordAuditEvent({ actorUserId: actor.userId, actorRole: actor.role,
       action: "handoff.reply", resourceType: "conversation", resourceId: id,
-      outcome: "failure", metadata: { errorType: error instanceof Error ? error.name : "UnknownError" } });
-    throw error;
+      outcome: "failure", metadata: { errorType: error instanceof Error ? error.name : "UnknownError",
+        statusCode: 503 } });
+    return new NextResponse("Message delivery is temporarily unavailable", { status: 503 });
   }
   return NextResponse.redirect(new URL(`/handoff?conversation=${id}`, request.url), 303);
 }

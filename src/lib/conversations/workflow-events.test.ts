@@ -14,4 +14,6 @@ test("uses compact state-change labels", () => {
     "Atendimento marcado como aguardando resposta do cliente.");
   assert.equal(workflowEventText({ eventType: "awaiting_customer_cancelled" }),
     "O cliente respondeu e o atendimento voltou ao estado em andamento.");
+  assert.equal(workflowEventText({ eventType: "returned_to_agent" }),
+    "Atendimento devolvido ao agente automático.");
 });

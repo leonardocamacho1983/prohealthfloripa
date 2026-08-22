@@ -132,9 +132,20 @@ export class NeonConversationRepository implements ConversationRepository, Conve
       tx`INSERT INTO contacts (phone_number) VALUES (${input.phoneNumber})
         ON CONFLICT (phone_number) DO UPDATE SET updated_at=now()
         RETURNING id`,
-      tx`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
+      tx`WITH expired AS (
+        UPDATE conversations SET status='active', human_expires_at=NULL,
+          assigned_attendant_user_id=NULL, assigned_attendant_at=NULL,
+          awaiting_customer_since=NULL, awaiting_customer_by_user_id=NULL,
+          awaiting_customer_deadline_at=NULL, inactivity_token=NULL,
+          human_send_token=NULL, human_send_lease_until=NULL,
+          assignment_version=assignment_version + 1, updated_at=now()
         WHERE contact_id=(SELECT id FROM contacts WHERE phone_number=${input.phoneNumber})
-          AND status='human_active' AND human_expires_at <= now()`,
+          AND status='human_active' AND human_expires_at <= now()
+        RETURNING id, assignment_version
+      ) INSERT INTO conversation_events (conversation_id, event_type, metadata, idempotency_key)
+        SELECT id, 'returned_to_agent', jsonb_build_object('origin', 'human_lease_expired'),
+          'human-expired:' || id::text || ':' || assignment_version::text FROM expired
+        ON CONFLICT (idempotency_key) DO NOTHING`,
       tx`INSERT INTO conversations (contact_id, reopened_from_conversation_id)
         SELECT ct.id, (SELECT previous.id FROM conversations previous
           WHERE previous.contact_id=ct.id AND previous.status='closed'
@@ -216,10 +227,9 @@ export class NeonConversationRepository implements ConversationRepository, Conve
   async getConversationState(conversationId: string) {
     await ensureRuntimeSchema();
     const sql = getDatabase();
-    const rows = await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
-      WHERE id=${conversationId} AND status='human_active' AND human_expires_at <= now()
-      RETURNING status, human_expires_at` as Array<{ status: ConversationStatus; human_expires_at: Date | null }>;
-    const current = rows[0] ?? (await sql`SELECT status, human_expires_at FROM conversations WHERE id=${conversationId} LIMIT 1` as Array<{ status: ConversationStatus; human_expires_at: Date | null }>)[0];
+    const current = (await sql`SELECT status, human_expires_at FROM conversations
+      WHERE id=${conversationId} LIMIT 1` as Array<{
+        status: ConversationStatus; human_expires_at: Date | null }>)[0];
     if (!current) throw new Error("Conversation not found");
     return { status: current.status, ...(current.human_expires_at ? { expiresAt: new Date(current.human_expires_at) } : {}) };
   }
@@ -229,15 +239,23 @@ export class NeonConversationRepository implements ConversationRepository, Conve
     await Promise.all([ensureRuntimeSchema(), ensureReasonSchema(), ensureConversationWorkflowSchema()]);
     const sql = getDatabase(); const now = input.now ?? new Date();
     const reasonId = inferHandoffReasonId({ source: input.source, reason: input.reason });
-    await sql`UPDATE conversations SET status='human_requested', provider_account_id=${input.providerAccountId},
-      provider_conversation_id=${input.providerConversationId}, handoff_reason=${input.reason}, handoff_source=${input.source},
-      handoff_reason_id=${reasonId},
-      handoff_requested_at=COALESCE(handoff_requested_at, ${now}), human_expires_at=NULL,
-      summary=${input.summary}, processed_revision=inbound_revision, processing_token=NULL,
-      processing_revision=NULL, processing_lease_until=NULL, updated_at=now() WHERE id=${input.conversationId}`;
-    await sql`INSERT INTO conversation_events (conversation_id, event_type, reason_id, metadata, idempotency_key)
-      VALUES (${input.conversationId}, 'handoff_requested', ${reasonId},
-        jsonb_build_object('source', ${input.source}), ${`handoff-requested:${input.conversationId}`})
+    await sql`WITH requested AS (
+      UPDATE conversations SET status='human_requested', provider_account_id=${input.providerAccountId},
+        provider_conversation_id=${input.providerConversationId}, handoff_reason=${input.reason}, handoff_source=${input.source},
+        handoff_reason_id=${reasonId}, handoff_requested_at=${now}, human_started_at=NULL,
+        human_expires_at=NULL, assigned_attendant_user_id=NULL, assigned_attendant_at=NULL,
+        awaiting_customer_since=NULL, awaiting_customer_by_user_id=NULL,
+        awaiting_customer_deadline_at=NULL, inactivity_token=NULL,
+        human_send_token=NULL, human_send_lease_until=NULL,
+        summary=${input.summary}, processed_revision=inbound_revision, processing_token=NULL,
+        processing_revision=NULL, processing_lease_until=NULL,
+        assignment_version=assignment_version + 1, updated_at=now()
+      WHERE id=${input.conversationId} AND status='active'
+      RETURNING id, assignment_version
+    )
+    INSERT INTO conversation_events (conversation_id, event_type, reason_id, metadata, idempotency_key)
+      SELECT id, 'handoff_requested', ${reasonId}, jsonb_build_object('source', ${input.source}),
+        'handoff-requested:' || id::text || ':' || assignment_version::text FROM requested
       ON CONFLICT (idempotency_key) DO NOTHING`;
     await this.recordHandoffEvent(input.conversationId, `handoff_requested:${input.source}`);
     if (await isFeatureEnabled("sla_engine")) {
@@ -255,12 +273,11 @@ export class NeonConversationRepository implements ConversationRepository, Conve
   async listHandoffs(): Promise<HandoffConversation[]> {
     await Promise.all([ensureRuntimeSchema(), ensureReasonSchema(), ensureConversationWorkflowSchema(),
       ensureAttendantSchema(), ensureSlaSchema()]); const sql = getDatabase();
-    await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
-      WHERE status='human_active' AND human_expires_at <= now()`;
     const rows = await sql`SELECT c.id, c.contact_id, ct.first_name, ct.phone_number, c.status, c.handoff_reason,
       c.handoff_source, c.summary, c.handoff_requested_at, c.human_started_at, c.human_expires_at,
       c.last_message_at, c.provider_account_id, c.provider_conversation_id, c.assigned_attendant_user_id,
-      c.assignment_version, c.awaiting_customer_since, c.awaiting_customer_deadline_at,
+      c.assignment_version, c.inbound_revision, c.processed_revision,
+      c.awaiting_customer_since, c.awaiting_customer_deadline_at,
       cs.status sla_status, cs.response_due_at,
       ap.display_name assigned_attendant_name,
       (SELECT count(*)::int FROM messages m WHERE m.conversation_id=c.id AND m.direction='inbound'
@@ -273,7 +290,8 @@ export class NeonConversationRepository implements ConversationRepository, Conve
         handoff_reason: string | null; handoff_source: HandoffSource | null; summary: string | null; handoff_requested_at: Date | null;
         human_started_at: Date | null; human_expires_at: Date | null; last_message_at: Date; unread_count: number;
         provider_account_id: string | null; provider_conversation_id: string | null; assigned_attendant_user_id: string | null;
-        assignment_version: string | number; awaiting_customer_since: Date | null;
+        assignment_version: string | number; inbound_revision: string | number;
+        processed_revision: string | number; awaiting_customer_since: Date | null;
         awaiting_customer_deadline_at: Date | null; assigned_attendant_name: string | null;
         sla_status: "normal" | "warning" | "breached" | "paused" | "completed" | null;
         response_due_at: Date | null;
@@ -289,6 +307,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
       ...(row.assigned_attendant_user_id ? { assignedAttendantUserId: row.assigned_attendant_user_id } : {}),
       ...(row.assigned_attendant_name ? { assignedAttendantName: row.assigned_attendant_name } : {}),
       assignmentVersion: Number(row.assignment_version),
+      inboundRevision: Number(row.inbound_revision), processedRevision: Number(row.processed_revision),
       ...(row.awaiting_customer_since ? { awaitingCustomerSince: new Date(row.awaiting_customer_since) } : {}),
       ...(row.awaiting_customer_deadline_at
         ? { awaitingCustomerDeadlineAt: new Date(row.awaiting_customer_deadline_at) } : {}),
@@ -300,12 +319,11 @@ export class NeonConversationRepository implements ConversationRepository, Conve
   async listInboxConversations(limit = 100, viewerUserId?: string): Promise<InboxConversation[]> {
     await Promise.all([ensureRuntimeSchema(), ensureReasonSchema(), ensureConversationWorkflowSchema(),
       ensureAttendantSchema(), ensureSlaSchema(), ensurePromiseSchema(), ensureNotificationDeliverySchema()]); const sql = getDatabase();
-    await sql`UPDATE conversations SET status='active', human_expires_at=NULL, updated_at=now()
-      WHERE status='human_active' AND human_expires_at <= now()`;
     const rows = await sql`SELECT c.id, c.contact_id, ct.first_name, ct.phone_number, c.status, c.handoff_reason,
       c.handoff_source, c.summary, c.handoff_requested_at, c.human_started_at, c.human_expires_at,
       c.last_message_at, c.provider_account_id, c.provider_conversation_id, c.assigned_attendant_user_id,
-      c.assignment_version, c.awaiting_customer_since, c.awaiting_customer_deadline_at,
+      c.assignment_version, c.inbound_revision, c.processed_revision,
+      c.awaiting_customer_since, c.awaiting_customer_deadline_at,
       cs.status sla_status, cs.response_due_at,
       (SELECT count(*)::int FROM conversation_promises cp WHERE cp.conversation_id=c.id
         AND cp.status IN ('open','overdue')) open_promise_count,
@@ -325,6 +343,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
         handoff_requested_at: Date | null; human_started_at: Date | null; human_expires_at: Date | null;
         last_message_at: Date; unread_count: number; provider_account_id: string | null; provider_conversation_id: string | null;
         assigned_attendant_user_id: string | null; assignment_version: string | number;
+        inbound_revision: string | number; processed_revision: string | number;
         awaiting_customer_since: Date | null; awaiting_customer_deadline_at: Date | null;
         assigned_attendant_name: string | null;
         sla_status: "normal" | "warning" | "breached" | "paused" | "completed" | null;
@@ -342,6 +361,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
       ...(row.assigned_attendant_user_id ? { assignedAttendantUserId: row.assigned_attendant_user_id } : {}),
       ...(row.assigned_attendant_name ? { assignedAttendantName: row.assigned_attendant_name } : {}),
       assignmentVersion: Number(row.assignment_version),
+      inboundRevision: Number(row.inbound_revision), processedRevision: Number(row.processed_revision),
       ...(row.awaiting_customer_since ? { awaitingCustomerSince: new Date(row.awaiting_customer_since) } : {}),
       ...(row.awaiting_customer_deadline_at
         ? { awaitingCustomerDeadlineAt: new Date(row.awaiting_customer_deadline_at) } : {}),
@@ -401,8 +421,8 @@ export class NeonConversationRepository implements ConversationRepository, Conve
     )
     INSERT INTO conversation_events (conversation_id, event_type, actor_user_id, actor_label,
       to_user_id, to_user_label, reason_id, idempotency_key)
-    SELECT id, 'assumed', ${actor.userId}, ${actor.label}, ${actor.userId}, ${actor.label},
-      handoff_reason_id, 'take-handoff:' || assumed.id::text || ':' || assumed.assignment_version::text
+    SELECT assumed.id, 'assumed', ${actor.userId}, ${actor.label}, ${actor.userId}, ${actor.label},
+      c.handoff_reason_id, 'take-handoff:' || assumed.id::text || ':' || assumed.assignment_version::text
     FROM assumed JOIN conversations c ON c.id=assumed.id
     ON CONFLICT (idempotency_key) DO NOTHING RETURNING conversation_id` as Array<{ conversation_id: string }>;
     if (!rows[0]) throw new Error("Conversation is assigned to another attendant");
@@ -419,6 +439,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
   }
 
   async closeHandoff(input: { conversationId: string; actorUserId: string; actorLabel: string;
+    expectedAssignmentVersion: number; expectedInboundRevision: number;
     reasonId: string; reasonLabel: string; note?: string }) {
     await Promise.all([ensureRuntimeSchema(), ensureReasonSchema()]); const sql = getDatabase();
     const rows = await sql`UPDATE conversations SET status='closed', closed_at=now(), human_expires_at=NULL, updated_at=now(),
@@ -430,6 +451,8 @@ export class NeonConversationRepository implements ConversationRepository, Conve
       processed_revision=inbound_revision, processing_token=NULL, processing_revision=NULL,
       processing_lease_until=NULL WHERE id=${input.conversationId} AND status='human_active'
         AND assigned_attendant_user_id=${input.actorUserId}
+        AND assignment_version=${input.expectedAssignmentVersion}
+        AND inbound_revision=${input.expectedInboundRevision}
       RETURNING id, contact_id` as Array<{ id: string; contact_id: string }>;
     if (!rows[0]) throw new Error("Conversation is not owned by this attendant");
     await sql`INSERT INTO interaction_events (contact_id, event_type, metadata)
@@ -456,7 +479,7 @@ export class NeonConversationRepository implements ConversationRepository, Conve
       SELECT conversation_id FROM conversation_events
       WHERE idempotency_key=${input.idempotencyKey} AND conversation_id=${input.conversationId}
     ), current AS MATERIALIZED (
-      SELECT c.id, c.assigned_attendant_user_id,
+      SELECT c.id, c.status, c.assigned_attendant_user_id,
         (SELECT display_name FROM attendant_profiles
           WHERE clerk_user_id=c.assigned_attendant_user_id) assigned_attendant_label
       FROM conversations c
@@ -467,11 +490,12 @@ export class NeonConversationRepository implements ConversationRepository, Conve
         AND (human_send_token IS NULL OR human_send_lease_until <= now())
       FOR UPDATE
     ), moved AS (
-      UPDATE conversations c SET status='human_active',
+      UPDATE conversations c SET status=current.status,
         handoff_reason=${input.reasonLabel},
         handoff_reason_id=${input.reasonId},
         handoff_requested_at=COALESCE(c.handoff_requested_at, now()),
-        human_started_at=COALESCE(c.human_started_at, now()),
+        human_started_at=CASE WHEN current.status='human_active'
+          THEN COALESCE(c.human_started_at, now()) ELSE NULL END,
         assigned_attendant_user_id=${input.targetUserId},
         assigned_attendant_at=now(), assignment_version=assignment_version + 1,
         last_human_actor_user_id=${input.actorUserId}, last_human_actor_label=${input.actorLabel},
@@ -479,7 +503,8 @@ export class NeonConversationRepository implements ConversationRepository, Conve
         awaiting_customer_deadline_at=NULL, inactivity_token=NULL,
         next_process_at=NULL, processing_token=NULL, processing_revision=NULL,
         processing_lease_until=NULL,
-        human_expires_at=now() + interval '12 hours',
+        human_expires_at=CASE WHEN current.status='human_active'
+          THEN now() + interval '12 hours' ELSE NULL END,
         updated_at=now()
       FROM current WHERE c.id=current.id
       RETURNING c.id, current.assigned_attendant_user_id from_user_id,
@@ -541,8 +566,12 @@ export class NeonConversationRepository implements ConversationRepository, Conve
     const rows = await sql`WITH resumed AS (
       UPDATE conversations SET status='active', handoff_reason=NULL, handoff_source=NULL,
         handoff_requested_at=NULL, summary=NULL, human_expires_at=NULL,
+        assigned_attendant_user_id=NULL, assigned_attendant_at=NULL,
+        awaiting_customer_since=NULL, awaiting_customer_by_user_id=NULL,
+        awaiting_customer_deadline_at=NULL, inactivity_token=NULL,
+        human_send_token=NULL, human_send_lease_until=NULL,
         processing_token=NULL, processing_revision=NULL, processing_lease_until=NULL,
-        updated_at=now()
+        assignment_version=assignment_version + 1, updated_at=now()
       WHERE id=${conversationId} AND status='human_requested' AND human_started_at IS NULL
       RETURNING id, contact_id
     )
@@ -552,36 +581,65 @@ export class NeonConversationRepository implements ConversationRepository, Conve
     return Boolean(rows[0]);
   }
 
-  async returnToAgent(input: { conversationId: string; actorUserId: string; actorLabel: string }): Promise<void> {
+  async returnToAgent(input: { conversationId: string; actorUserId: string; actorLabel: string;
+    actorCanForce: boolean; expectedAssignmentVersion: number; idempotencyKey: string }): Promise<{
+      observedRevision: number; shouldQueue: boolean;
+    }> {
     await Promise.all([ensureRuntimeSchema(), ensureReasonSchema(), ensureConversationWorkflowSchema()]);
     const sql = getDatabase();
-    const rows = await sql`WITH returned AS (
-      UPDATE conversations SET status='active', handoff_reason=NULL, handoff_source=NULL,
+    const rows = await sql`WITH existing AS MATERIALIZED (
+      SELECT conversation_id id,
+        (metadata->>'observedRevision')::bigint observed_revision,
+        COALESCE((metadata->>'shouldQueue')::boolean, false) should_queue
+      FROM conversation_events WHERE conversation_id=${input.conversationId}
+        AND idempotency_key=${input.idempotencyKey}
+    ), current AS MATERIALIZED (
+      SELECT c.id, c.contact_id, c.inbound_revision, c.processed_revision,
+        (SELECT m.direction FROM messages m WHERE m.conversation_id=c.id
+          ORDER BY m.created_at DESC, m.id DESC LIMIT 1) latest_direction
+      FROM conversations c WHERE c.id=${input.conversationId}
+        AND c.status IN ('human_requested','human_active')
+        AND c.assignment_version=${input.expectedAssignmentVersion}
+        AND (${input.actorCanForce} OR c.assigned_attendant_user_id=${input.actorUserId})
+        AND (c.human_send_token IS NULL OR c.human_send_lease_until <= now())
+      FOR UPDATE
+    ), returned AS (
+      UPDATE conversations c SET status='active', handoff_reason=NULL, handoff_source=NULL,
         handoff_requested_at=NULL, summary=NULL, human_started_at=NULL, human_expires_at=NULL,
-        assigned_attendant_user_id=NULL, awaiting_customer_since=NULL,
-        awaiting_customer_by_user_id=NULL, awaiting_customer_deadline_at=NULL,
-        inactivity_token=NULL, processing_token=NULL, processing_revision=NULL,
-        processing_lease_until=NULL, processed_revision=inbound_revision,
-        next_process_at=NULL, updated_at=now(),
-        assignment_version=assignment_version + 1
-      WHERE id=${input.conversationId} AND status IN ('human_requested','human_active')
-        AND (human_send_token IS NULL OR human_send_lease_until <= now())
-      RETURNING id, contact_id, inbound_revision, processed_revision
+        assigned_attendant_user_id=NULL, assigned_attendant_at=NULL,
+        awaiting_customer_since=NULL, awaiting_customer_by_user_id=NULL,
+        awaiting_customer_deadline_at=NULL, inactivity_token=NULL,
+        human_send_token=NULL, human_send_lease_until=NULL,
+        processing_token=NULL, processing_revision=NULL, processing_lease_until=NULL,
+        processed_revision=CASE WHEN current.latest_direction='inbound'
+          THEN c.processed_revision ELSE c.inbound_revision END,
+        next_process_at=CASE WHEN current.latest_direction='inbound'
+          AND c.processed_revision < c.inbound_revision THEN now() ELSE NULL END,
+        updated_at=now(), assignment_version=assignment_version + 1
+      FROM current WHERE c.id=current.id
+      RETURNING c.id, c.contact_id, c.inbound_revision observed_revision,
+        c.processed_revision < c.inbound_revision should_queue, c.assignment_version
     ), event_inserted AS (
       INSERT INTO conversation_events (conversation_id, event_type, actor_user_id, actor_label,
         metadata, idempotency_key)
       SELECT id, 'returned_to_agent', ${input.actorUserId}, ${input.actorLabel},
-        jsonb_build_object('origin', 'preview_control'),
-        'returned-to-agent:' || id::text || ':' || assignment_version::text
-      FROM returned JOIN conversations USING (id)
+        jsonb_build_object('origin', 'attendant_control', 'observedRevision', observed_revision,
+          'shouldQueue', should_queue), ${input.idempotencyKey}
+      FROM returned
       ON CONFLICT (idempotency_key) DO NOTHING
-    ) SELECT id, contact_id, inbound_revision, processed_revision FROM returned` as Array<{
-      id: string; contact_id: string; inbound_revision: number; processed_revision: number;
+    ) SELECT id, contact_id, observed_revision, should_queue FROM returned
+      UNION ALL
+      SELECT id, NULL::uuid contact_id, observed_revision, should_queue FROM existing
+      WHERE NOT EXISTS (SELECT 1 FROM returned) LIMIT 1` as Array<{
+      id: string; contact_id: string | null; observed_revision: string | number; should_queue: boolean;
     }>;
     if (!rows[0]) throw new Error("Conversation cannot be returned to the agent");
-    await sql`INSERT INTO interaction_events (contact_id, event_type, metadata)
-      VALUES (${rows[0].contact_id}, 'returned_to_agent', jsonb_build_object(
-        'conversationId', ${input.conversationId}, 'actorUserId', ${input.actorUserId}))`;
+    if (rows[0].contact_id) {
+      await sql`INSERT INTO interaction_events (contact_id, event_type, metadata)
+        VALUES (${rows[0].contact_id}, 'returned_to_agent', jsonb_build_object(
+          'conversationId', ${input.conversationId}, 'actorUserId', ${input.actorUserId}))`;
+    }
+    return { observedRevision: Number(rows[0].observed_revision), shouldQueue: rows[0].should_queue };
   }
 
   async markHandoffViewed(conversationId: string, viewerUserId: string) {

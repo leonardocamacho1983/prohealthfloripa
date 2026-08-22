@@ -31,7 +31,7 @@ export function ensureConversationWorkflowSchema(): Promise<void> {
             'awaiting_customer_started','awaiting_customer_cancelled',
             'closed_human','closed_automatic','reopened','sla_warning','sla_breached',
             'promise_created','promise_completed','promise_cancelled','promise_rescheduled',
-            'survey_sent','survey_answered')),
+            'survey_sent','survey_answered','returned_to_agent')),
           actor_user_id text, actor_label text,
           from_user_id text, from_user_label text,
           to_user_id text, to_user_label text,
@@ -49,13 +49,14 @@ export function ensureConversationWorkflowSchema(): Promise<void> {
             WHERE conrelid='conversation_events'::regclass
               AND conname='conversation_events_event_type_check'
               AND pg_get_constraintdef(oid) LIKE '%survey_answered%'
+              AND pg_get_constraintdef(oid) LIKE '%returned_to_agent%'
           ) THEN
             ALTER TABLE conversation_events DROP CONSTRAINT IF EXISTS conversation_events_event_type_check;
             ALTER TABLE conversation_events ADD CONSTRAINT conversation_events_event_type_check CHECK (event_type IN (
               'handoff_requested','assigned','assumed','transferred','awaiting_customer_started',
               'awaiting_customer_cancelled','closed_human','closed_automatic','reopened','sla_warning','sla_breached',
               'promise_created','promise_completed','promise_cancelled','promise_rescheduled',
-              'survey_sent','survey_answered'));
+              'survey_sent','survey_answered','returned_to_agent'));
           END IF;
         END $$`,
       ]);

@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import type { InboxQuickReply } from "@/lib/inbox/repository";
 import styles from "./handoff.module.css";
 
-export function QuickReplyComposer({ conversationId, quickReplies, assignmentVersion }: {
+export function QuickReplyComposer({ conversationId, quickReplies, assignmentVersion, assumesConversation = false }: {
   conversationId: string;
   quickReplies: InboxQuickReply[];
   assignmentVersion: number;
+  assumesConversation?: boolean;
 }) {
   const router = useRouter();
   const draftKey = `prohealth:reply-draft:${conversationId}`;
@@ -49,7 +50,9 @@ export function QuickReplyComposer({ conversationId, quickReplies, assignmentVer
           ? "A conversa mudou. Atualize a página antes de enviar."
           : response.status === 401 || response.status === 403
             ? "Sua sessão não permite enviar mensagens. Atualize a página."
-            : "Não foi possível enviar a mensagem. Tente novamente.");
+            : response.status === 503
+              ? "O envio está temporariamente indisponível. Sua mensagem foi preservada; tente novamente."
+              : "Não foi possível enviar a mensagem. Tente novamente.");
         return;
       }
       setDraft("");
@@ -84,7 +87,8 @@ export function QuickReplyComposer({ conversationId, quickReplies, assignmentVer
         value={draft} disabled={pending} aria-invalid={Boolean(error) || undefined}
         aria-describedby={error ? errorId : undefined} onKeyDown={submitWithShortcut}
         onChange={(event) => { setDraft(event.target.value); setError(""); }} />
-      <button type="submit" disabled={pending || !draft.trim()}>{pending ? "Enviando…" : "Enviar"}</button>
+      <button type="submit" disabled={pending || !draft.trim()}>{pending ? "Enviando…"
+        : assumesConversation ? "Responder e assumir" : "Enviar"}</button>
       {error ? <p id={errorId} className={styles.composerFeedback} role="alert">{error}</p> : null}
     </form>
   </div>;

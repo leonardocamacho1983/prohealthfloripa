@@ -29,6 +29,8 @@ function conversation(overrides: Partial<SearchableInboxConversation> = {}): Sea
     providerAccountId: "account",
     providerConversationId: "provider-conversation",
     assignmentVersion: 0,
+    inboundRevision: 0,
+    processedRevision: 0,
     ...overrides,
   };
 }

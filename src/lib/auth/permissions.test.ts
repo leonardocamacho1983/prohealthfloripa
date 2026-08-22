@@ -4,7 +4,7 @@ import { APP_PERMISSIONS, hasPermission, parseAppRole, type AppRole } from "./pe
 import { resolveAppRole } from "./role-resolution.ts";
 
 const handoffPermissions = ["handoff:view", "handoff:assume", "handoff:reply", "handoff:close",
-  "handoff:transfer", "notifications:test"] as const;
+  "handoff:return_to_agent", "handoff:transfer", "notifications:test"] as const;
 
 test("owner and admin have every application permission", () => {
   for (const role of ["owner", "admin"] as const) {

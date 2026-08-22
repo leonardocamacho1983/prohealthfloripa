@@ -24,10 +24,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await recordAuditEvent({ actorUserId: actor.userId, actorRole: actor.role,
       action: "handoff.take", resourceType: "conversation", resourceId: id, outcome: "success" });
   } catch (error) {
+    const conflict = error instanceof Error
+      && error.message === "Conversation is assigned to another attendant";
     await recordAuditEvent({ actorUserId: actor.userId, actorRole: actor.role,
       action: "handoff.take", resourceType: "conversation", resourceId: id,
-      outcome: "failure", metadata: { errorType: error instanceof Error ? error.name : "UnknownError", statusCode: 409 } });
-    return new NextResponse("Conversation is assigned to another attendant", { status: 409 });
+      outcome: "failure", metadata: { errorType: error instanceof Error ? error.name : "UnknownError",
+        statusCode: conflict ? 409 : 500 } });
+    return new NextResponse(conflict ? "Conversation is assigned to another attendant"
+      : "Conversation could not be assumed", { status: conflict ? 409 : 500 });
   }
   return NextResponse.redirect(new URL(`/handoff?conversation=${id}`, request.url), 303);
 }

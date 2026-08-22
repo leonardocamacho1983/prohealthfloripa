@@ -9,13 +9,15 @@ const errorMessageFor = (status: number) => {
   if (status === 401 || status === 403) return "Sua sessão não permite esta ação. Atualize a página.";
   if (status === 409) return "A conversa mudou. Atualize a página e tente novamente.";
   if (status === 503) return "Serviço indisponível no momento. Tente novamente em instantes.";
+  if (status >= 500) return "O sistema não conseguiu concluir a ação. Tente novamente em instantes.";
   return "Não foi possível concluir a ação. Tente novamente.";
 };
 
-export function AsyncActionForm({ action, buttonClassName, confirmMessage, idleLabel, pendingLabel }: {
+export function AsyncActionForm({ action, buttonClassName, confirmMessage, hiddenFields, idleLabel, pendingLabel }: {
   action: string;
   buttonClassName: string;
   confirmMessage?: string;
+  hiddenFields?: Record<string, string | number>;
   idleLabel: string;
   pendingLabel: string;
 }) {
@@ -52,6 +54,8 @@ export function AsyncActionForm({ action, buttonClassName, confirmMessage, idleL
   };
 
   return <form className={styles.asyncActionForm} onSubmit={submit} aria-busy={pending}>
+    {Object.entries(hiddenFields ?? {}).map(([name, value]) =>
+      <input key={name} type="hidden" name={name} value={String(value)} />)}
     <button className={buttonClassName} type="submit" disabled={pending}>
       {pending ? pendingLabel : idleLabel}
     </button>

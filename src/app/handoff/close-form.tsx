@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 
 import styles from "./handoff.module.css";
 
-export function CloseHandoffForm({ conversationId, reasons }: {
+export function CloseHandoffForm({ conversationId, reasons, assignmentVersion, inboundRevision }: {
   conversationId: string;
   reasons: Array<{ id: string; label: string }>;
+  assignmentVersion: number;
+  inboundRevision: number;
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -28,7 +30,7 @@ export function CloseHandoffForm({ conversationId, reasons }: {
         setError(response.status === 400
           ? "Escolha um motivo válido para encerrar."
           : response.status === 409
-            ? "Este atendimento mudou de responsável. Atualize a página."
+            ? "Chegou uma mensagem nova ou o atendimento mudou. Atualize a página antes de encerrar."
             : "Não foi possível encerrar o atendimento.");
         return;
       }
@@ -51,6 +53,8 @@ export function CloseHandoffForm({ conversationId, reasons }: {
         <button type="submit" aria-label="Fechar">×</button>
       </form>
       <form className={styles.closeDialogForm} onSubmit={submit} aria-busy={pending}>
+        <input type="hidden" name="expectedAssignmentVersion" value={assignmentVersion} />
+        <input type="hidden" name="expectedInboundRevision" value={inboundRevision} />
         <div><p className={styles.eyebrow}>Conclusão do atendimento</p>
           <h2 id="close-title">Por que este atendimento está sendo encerrado?</h2>
           <p>O motivo fica somente na plataforma e ajuda a melhorar a operação.</p></div>

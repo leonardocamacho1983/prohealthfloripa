@@ -20,13 +20,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const form = await request.formData();
   const reasonId = form.get("reasonId");
   const noteValue = form.get("note");
+  const expectedAssignmentVersion = Number(form.get("expectedAssignmentVersion"));
+  const expectedInboundRevision = Number(form.get("expectedInboundRevision"));
   const note = typeof noteValue === "string" ? noteValue.trim().slice(0, 500) : "";
-  if (typeof reasonId !== "string") return new NextResponse("Closure reason is required", { status: 400 });
+  if (typeof reasonId !== "string" || !Number.isSafeInteger(expectedAssignmentVersion)
+      || expectedAssignmentVersion < 0 || !Number.isSafeInteger(expectedInboundRevision)
+      || expectedInboundRevision < 0) {
+    return new NextResponse("Invalid closure request", { status: 400 });
+  }
   const reason = await findActiveConversationReason("human_closure", reasonId);
   if (!reason) return new NextResponse("Invalid closure reason", { status: 400 });
   try {
     await new NeonConversationRepository().closeHandoff({ conversationId: id,
-      actorUserId: actor.userId, actorLabel: appUserLabel(actor), reasonId: reason.id,
+      actorUserId: actor.userId, actorLabel: appUserLabel(actor),
+      expectedAssignmentVersion, expectedInboundRevision, reasonId: reason.id,
       reasonLabel: reason.label, ...(note ? { note } : {}) });
     await resolveHandoffNotificationsBestEffort(id, "closed");
     await recordAuditEvent({ actorUserId: actor.userId, actorRole: actor.role,

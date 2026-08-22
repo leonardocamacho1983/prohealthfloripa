@@ -22,6 +22,8 @@ export type HandoffConversation = {
   assignedAttendantUserId?: string;
   assignedAttendantName?: string;
   assignmentVersion: number;
+  inboundRevision: number;
+  processedRevision: number;
   awaitingCustomerSince?: Date;
   awaitingCustomerDeadlineAt?: Date;
   slaStatus?: "normal" | "warning" | "breached" | "paused" | "completed";
@@ -47,8 +49,12 @@ export interface HandoffStore {
   takeHandoff(conversationId: string, actor: { userId: string; label: string }): Promise<void>;
   touchHandoff(conversationId: string, actorUserId: string): Promise<void>;
   closeHandoff(input: { conversationId: string; actorUserId: string; actorLabel: string;
+    expectedAssignmentVersion: number; expectedInboundRevision: number;
     reasonId: string; reasonLabel: string; note?: string }): Promise<void>;
-  returnToAgent?(input: { conversationId: string; actorUserId: string; actorLabel: string }): Promise<void>;
+  returnToAgent?(input: { conversationId: string; actorUserId: string; actorLabel: string;
+    actorCanForce: boolean; expectedAssignmentVersion: number; idempotencyKey: string }): Promise<{
+      observedRevision: number; shouldQueue: boolean;
+    }>;
   transferHandoff?(input: { conversationId: string; actorUserId: string; actorLabel: string;
     actorCanForce: boolean; expectedAssignmentVersion: number; targetUserId: string;
     targetLabel: string; reasonId: string; reasonLabel: string; note?: string;

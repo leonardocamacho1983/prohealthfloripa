@@ -41,6 +41,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 
 export const dynamic = "force-dynamic";
 
+const attendantWorkflowLabel = (input: { status: "active" | "human_requested" | "human_active" | "closed";
+  awaitingCustomer: boolean; assignedToViewer: boolean }) => {
+  if (input.awaitingCustomer) return "Aguardando cliente";
+  if (input.status === "human_requested" && input.assignedToViewer) return "Atribuída — aguardando aceite";
+  return workflowStatusLabel({ status: input.status });
+};
+
 const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
   hour: "2-digit",
   minute: "2-digit",
@@ -71,7 +78,7 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
   }
   const canOperate = hasPermission(appUser.role, "handoff:reply");
   const canManage = appUser.role === "admin" || appUser.role === "owner";
-  const canReturnToAgent = canManage && process.env.VERCEL_ENV === "preview";
+  const canReturnToAgent = hasPermission(appUser.role, "handoff:return_to_agent");
   const params = await searchParams;
   const activeAccount = appUser.email?.trim() || appUser.name?.trim() || "Conta ativa";
   const filter: InboxFilter = allowedFilters.includes(params.filter as InboxFilter)
@@ -228,7 +235,8 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
               <small>{item.messages.at(-1)?.content ?? item.reason ?? "Sem mensagens"}</small>
               <span className={styles.rowLabels}>
                 <em className={`${styles.rowStatus} ${item.awaitingCustomerSince ? styles.status_awaiting_customer : styles[`status_${item.status}`]}`}>
-                  {workflowStatusLabel({ status: item.status, awaitingCustomer: Boolean(item.awaitingCustomerSince) })}</em>
+                  {attendantWorkflowLabel({ status: item.status, awaitingCustomer: Boolean(item.awaitingCustomerSince),
+                    assignedToViewer: item.assignedAttendantUserId === appUser.userId })}</em>
                 {item.assignedAttendantUserId ? <em className={styles.ownerLabel}>
                   {item.assignedAttendantUserId === appUser.userId ? "Com você" : "Atribuída"}
                 </em> : null}
@@ -266,7 +274,9 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
                     ? activeAccount : selected.assignedAttendantName ?? "outro atendente"}
                 </p> : <p className={styles.ownerLine}>Sem responsável</p>}</div>
               <span className={`${styles.status} ${selected.awaitingCustomerSince ? styles.status_awaiting_customer : styles[`status_${selected.status}`]}`}>
-                {workflowStatusLabel({ status: selected.status, awaitingCustomer: Boolean(selected.awaitingCustomerSince) })}</span>
+                {attendantWorkflowLabel({ status: selected.status,
+                  awaitingCustomer: Boolean(selected.awaitingCustomerSince),
+                  assignedToViewer: selected.assignedAttendantUserId === appUser.userId })}</span>
             </div>
             {selected.status === "human_requested" || selected.status === "human_active" ? <div className={styles.summary}>
               <strong>Resumo para atendimento</strong><p>{selected.summary}</p>
@@ -285,9 +295,12 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
             </div>)}</div>
             {canOperate ? <div className={styles.actions}>
               {canReturnToAgent && (selected.status === "human_requested" || selected.status === "human_active")
+                  && (hasPermission(appUser.role, "handoff:force_transfer")
+                    || selected.assignedAttendantUserId === appUser.userId)
                 ? <AsyncActionForm action={`/api/handoff/${selected.id}/return-to-agent`}
                   buttonClassName={styles.secondary} idleLabel="Devolver conversa ao agente"
                   pendingLabel="Devolvendo…"
+                  hiddenFields={{ expectedAssignmentVersion: selected.assignmentVersion }}
                   confirmMessage="Devolver esta conversa ao atendimento automático?" /> : null}
               {selected.status === "active" && (!selected.assignedAttendantUserId || selected.assignedAttendantUserId === appUser.userId)
                 ? <AsyncActionForm action={`/api/handoff/${selected.id}/assume`}
@@ -296,7 +309,8 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
                 ? <AsyncActionForm action={`/api/handoff/${selected.id}/take`}
                 buttonClassName={styles.secondary} idleLabel="Assumir conversa" pendingLabel="Assumindo…" /> : null}
               {selected.status === "human_active" && selected.assignedAttendantUserId === appUser.userId
-                ? <><CloseHandoffForm conversationId={selected.id} reasons={closureReasons} />
+                ? <><CloseHandoffForm conversationId={selected.id} reasons={closureReasons}
+                  assignmentVersion={selected.assignmentVersion} inboundRevision={selected.inboundRevision} />
                   {awaitingCustomerEnabled ? <AwaitingCustomerActions conversationId={selected.id}
                     assignmentVersion={selected.assignmentVersion} awaiting={Boolean(selected.awaitingCustomerSince)} /> : null}</>
                 : null}
@@ -307,7 +321,7 @@ export default async function HandoffPage({ searchParams }: { searchParams: Prom
             {canOperate && (selected.status === "human_requested" || selected.status === "human_active")
               && (!selected.assignedAttendantUserId || selected.assignedAttendantUserId === appUser.userId)
               ? <QuickReplyComposer conversationId={selected.id} quickReplies={quickReplies}
-                assignmentVersion={selected.assignmentVersion} />
+                assignmentVersion={selected.assignmentVersion} assumesConversation={selected.status === "human_requested"} />
               : <div className={styles.readOnlyNote}>{!canOperate
                 ? "Acesso em modo leitura."
                 : selected.assignedAttendantUserId && selected.assignedAttendantUserId !== appUser.userId

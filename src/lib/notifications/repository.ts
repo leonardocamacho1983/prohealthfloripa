@@ -9,7 +9,7 @@ import { buildOperationalAlerts } from "./rules";
 import type { NotificationCandidate, NotificationChannelSetting, NotificationRecord } from "./types";
 import { cancelConversationDeliveries } from "./delivery-repository";
 
-export type HandoffNotificationResolution = "assumed" | "closed" | "taken";
+export type HandoffNotificationResolution = "assumed" | "closed" | "returned" | "taken";
 
 async function reconcileOperationalNotifications(activeNotifications: readonly NotificationCandidate[]) {
   await ensureMetricsSchema();

@@ -15,7 +15,8 @@ export type ConversationWorkflowEventType =
   | "promise_cancelled"
   | "promise_rescheduled"
   | "survey_sent"
-  | "survey_answered";
+  | "survey_answered"
+  | "returned_to_agent";
 
 export type ConversationWorkflowEvent = {
   id: string;
@@ -55,5 +56,6 @@ export function workflowEventText(event: Omit<ConversationWorkflowEvent, "id" | 
   if (event.eventType === "promise_rescheduled") return "Prazo do compromisso de retorno alterado.";
   if (event.eventType === "survey_sent") return "Pesquisa de experiência enviada.";
   if (event.eventType === "survey_answered") return "Pesquisa de experiência respondida.";
+  if (event.eventType === "returned_to_agent") return "Atendimento devolvido ao agente automático.";
   return "Atendimento transferido para a equipe.";
 }

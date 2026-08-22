@@ -29,6 +29,10 @@ export async function reserveSurveyDelivery(surveyId: string): Promise<SurveyDel
   const rows = await sql`SELECT s.id, s.conversation_id, c.provider_account_id, c.provider_conversation_id
     FROM cx_surveys s JOIN conversations c ON c.id=s.conversation_id
     WHERE s.id=${surveyId} AND s.status='pending' AND s.available_at <= now() AND s.expires_at > now()
+      AND c.status='closed'
+      AND NOT EXISTS (SELECT 1 FROM conversations newer WHERE newer.contact_id=c.contact_id
+        AND newer.id<>c.id AND newer.created_at>c.created_at
+        AND newer.status IN ('active','human_requested','human_active'))
       AND c.provider_account_id IS NOT NULL AND c.provider_conversation_id IS NOT NULL LIMIT 1` as Array<{
       id: string; conversation_id: string; provider_account_id: string; provider_conversation_id: string }>;
   const row = rows[0]; return row ? { id: row.id, conversationId: row.conversation_id,
