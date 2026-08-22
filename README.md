@@ -47,7 +47,7 @@ Os testes de integração exigem `TEST_DATABASE_URL` e criam um schema efêmero 
 
 ## Deploy na Vercel
 
-Use Node.js 22 ou superior. Fora da Vercel, configure `AI_GATEWAY_API_KEY`; nos deployments da Vercel, a autenticação OIDC é automática. Conecte o banco Neon para fornecer `DATABASE_URL`, mantenha a integração Clerk conectada aos ambientes desejados, cadastre as variáveis Zernio e `CRON_SECRET` e faça um novo deploy. A integração Clerk fornece `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` e `CLERK_SECRET_KEY`; não crie cópias dessas chaves. A Vercel provisiona os consumidores de Queue descritos em `vercel.json`; não é necessária uma credencial adicional para as filas. A aplicação aplica de forma idempotente as evoluções operacionais de banco até `migrations/0021_conversation_burst_batching.sql` no primeiro uso. Administradores também podem validar explicitamente o schema em `/admin/maintenance`.
+Use Node.js 22 ou superior. Fora da Vercel, configure `AI_GATEWAY_API_KEY`; nos deployments da Vercel, a autenticação OIDC é automática. Conecte o banco Neon para fornecer `DATABASE_URL`, mantenha a integração Clerk conectada aos ambientes desejados, cadastre as variáveis Zernio e `CRON_SECRET` e faça um novo deploy. A integração Clerk fornece `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` e `CLERK_SECRET_KEY`; não crie cópias dessas chaves. A Vercel provisiona os consumidores de Queue descritos em `vercel.json`; não é necessária uma credencial adicional para as filas. A aplicação aplica de forma idempotente as evoluções operacionais de banco até `migrations/0022_handoff_return_to_agent.sql` no primeiro uso. Administradores também podem validar explicitamente o schema em `/admin/maintenance`.
 
 ## Zernio Sandbox
 

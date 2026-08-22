@@ -13,6 +13,7 @@ const migrations = [
   "0019_knowledge_governance.sql",
   "0020_evaluation_and_workforce.sql",
   "0021_conversation_burst_batching.sql",
+  "0022_handoff_return_to_agent.sql",
 ];
 
 for (const migration of migrations) {

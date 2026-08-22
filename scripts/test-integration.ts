@@ -18,7 +18,7 @@ scopedUrl.searchParams.set("options", `-c search_path=${schema},public`);
 const sql = neon(scopedUrl.toString());
 
 try {
-  const migrations = Array.from({ length: 21 }, (_, index) => String(index + 1).padStart(4, "0"));
+  const migrations = Array.from({ length: 22 }, (_, index) => String(index + 1).padStart(4, "0"));
   const directory = fileURLToPath(new URL("../migrations/", import.meta.url));
   const names = [
     "customer_context", "handoffs", "conversation_orchestration", "nextfit_catalog_cache", "auth_audit",
@@ -26,7 +26,8 @@ try {
     "conversation_journey_state", "conversation_journey_dialogue", "attendant_availability",
     "reliable_handoff_operations", "training_governance", "conversation_workflow",
     "notification_delivery_observability", "sla_engine", "outcomes_surveys_promises",
-    "knowledge_governance", "evaluation_and_workforce", "handoff_return_to_agent",
+    "knowledge_governance", "evaluation_and_workforce", "conversation_burst_batching",
+    "handoff_return_to_agent",
   ];
   for (let index = 0; index < migrations.length; index += 1) {
     const file = `${migrations[index]}_${names[index]}.sql`;
