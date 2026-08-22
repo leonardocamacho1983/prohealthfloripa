@@ -7,6 +7,7 @@ export type ResponsePolicyIssueCode =
   | "too_many_questions"
   | "false_booking_confirmation"
   | "false_operational_completion"
+  | "unbacked_operational_promise"
   | "hot_bath_before_pilates"
   | "robotic_relaxation_language"
   | "internal_language_leak"
@@ -14,6 +15,8 @@ export type ResponsePolicyIssueCode =
   | "repeated_safety_screen"
   | "repeated_professional_disclaimer"
   | "address_permission_gate"
+  | "unsolicited_address"
+  | "unnecessary_clinical_screen"
   | "repeated_fact"
   | "asks_known_schedule_field"
   | "premature_optional_offer"
@@ -30,9 +33,15 @@ const BLOCKING_AGENT_POLICY_ISSUES = new Set<ResponsePolicyIssueCode>([
   "bubble_too_long",
   "false_booking_confirmation",
   "false_operational_completion",
+  "unbacked_operational_promise",
   "hot_bath_before_pilates",
   "internal_language_leak",
+  "unsolicited_address",
+  "unnecessary_clinical_screen",
   "unverified_availability_claim",
+  "too_many_questions",
+  "repeated_safety_screen",
+  "address_permission_gate",
 ]);
 
 /**
@@ -46,7 +55,25 @@ export function blockingAgentPolicyIssues(validation: ResponsePolicyValidation) 
 
 const BOOKING_CONFIRMATION = /\b(?:agendei|reservei|confirmei|marquei)|\b(?:est[aá]|ficou|foi)\s+(?:agendad[oa]|reservad[oa]|confirmad[oa]|marcad[oa])\b|\b(?:j[aá]\s+)?deixei\s+marcad[oa]\b|\b(?:hor[aá]rio|vaga)\s+(?:est[aá]\s+)?garantid[oa]\b|\bj[aá]\s+est[aá]\s+na\s+agenda\b/i;
 const OPERATIONAL_COMPLETION = /\b(?:j[aá]\s+)?(?:encaminhei|registrei|anotei|avisei|acion(?:ei|amos)|enviei)\b|\b(?:j[aá]\s+)?deixei\b[^.!?]{0,80}\b(?:pedido|solicita[cç][aã]o|equipe|agenda|registrad[oa])\b/i;
+const OPERATIONAL_PROMISE = /\b(?:vou|vamos|posso|podemos)\s+(?:encaminhar|transferir|acionar|avisar|registrar|enviar|passar)\b[^.!?]{0,120}\b(?:equipe|atendente|humano|agenda|pedido|solicita[cç][aã]o)\b/i;
 const HOT_BEFORE_PILATES = /banheira\s+quente[^.!?]{0,80}\bantes\b[^.!?]{0,40}\bpilates\b|\bantes\b[^.!?]{0,80}banheira\s+quente/i;
+const ADDRESS_CONTENT = /\b(?:rua\s+vera\s+linhares\s+de\s+andrade|endere[cç]o|localiza[cç][aã]o|c[oó]rrego\s+grande)\b/i;
+const CLINICAL_CAUSALITY = /\b(?:costuma\s+estar\s+ligad[oa]|pode\s+(?:ser|indicar|significar)|provavelmente|diagn[oó]stico|causad[oa]\s+por)\b/i;
+const CLINICAL_WARNING = /\b(?:queda|dor\s+(?:muito\s+)?forte|febre|formigamento|perda\s+de\s+for[cç]a|perda\s+de\s+sensibilidade|falta\s+de\s+ar|dor\s+no\s+peito)\b/gi;
+
+export function customerRequestedAddress(text: string): boolean {
+  return /\b(?:onde\s+(?:fica|[ée]|voc[eê]s\s+(?:ficam|est[aã]o))|endere[cç]o|localiza[cç][aã]o|como\s+cheg(?:o|ar)|qual\s+(?:a\s+)?rua)\b/i.test(text);
+}
+
+export function customerRequestedClinicalAdvice(text: string): boolean {
+  return /\b(?:o\s+que\s+pode\s+ser|qual\s+(?:a\s+)?causa|diagn[oó]stico|que\s+rem[eé]dio|posso\s+tomar|qual\s+tratamento|[ée]\s+seguro|tem\s+algum\s+risco)\b/i.test(text);
+}
+
+export function customerDescribesRoutineDiscomfort(text: string): boolean {
+  const discomfort = /\b(?:torcicolo|dor|tens[aã]o|rigidez|trav(?:ado|ada|ou)|desconforto|inc[oô]modo)\b/i.test(text);
+  const emergency = /\b(?:dor\s+(?:muito\s+)?forte|dor\s+no\s+peito|falta\s+de\s+ar|febre|queda|perda\s+de\s+for[cç]a|perda\s+de\s+sensibilidade|suspeita\s+de\s+trombose)\b/i.test(text);
+  return discomfort && !emergency && !customerRequestedClinicalAdvice(text);
+}
 
 const FACT_PATTERNS = {
   massage_price: /R\$\s*270\b/i,
@@ -61,6 +88,10 @@ export function validateResponsePolicy(input: {
   safetyStatus?: "not_asked" | "asked" | "cleared" | "flagged";
   professionalAdjustmentMentioned?: boolean;
   semanticPlan?: SemanticTurnPlan;
+  operationalActionAuthorized?: boolean;
+  addressRequested?: boolean;
+  routineDiscomfort?: boolean;
+  clinicalAdviceRequested?: boolean;
 }): ResponsePolicyValidation {
   const issues: ResponsePolicyValidation["issues"] = [];
   const messages = input.messages.map((message) => message.trim()).filter(Boolean);
@@ -79,6 +110,18 @@ export function validateResponsePolicy(input: {
   }
   if (OPERATIONAL_COMPLETION.test(text)) {
     issues.push({ code: "false_operational_completion", detail: "A resposta afirma uma ação operacional que o agente não executou." });
+  }
+  if (OPERATIONAL_PROMISE.test(text) && !input.operationalActionAuthorized) {
+    issues.push({ code: "unbacked_operational_promise", detail: "A resposta promete uma operação sem uma ação estruturada autorizada." });
+  }
+  if (ADDRESS_CONTENT.test(text) && input.addressRequested === false) {
+    issues.push({ code: "unsolicited_address", detail: "A resposta introduz localização sem relação com o pedido atual." });
+  }
+  if (input.routineDiscomfort && !input.clinicalAdviceRequested) {
+    const warnings = text.match(CLINICAL_WARNING) ?? [];
+    if (warnings.length >= 2 || CLINICAL_CAUSALITY.test(text)) {
+      issues.push({ code: "unnecessary_clinical_screen", detail: "Um desconforto cotidiano recebeu causalidade ou triagem clínica desnecessária." });
+    }
   }
   if (input.semanticPlan?.scheduling.time
     && /(?:qual|que)\s+per[ií]odo|manh[aã],?\s+(?:à|a)\s+tarde\s+ou\s+(?:à|a)\s+noite/i.test(text)) {

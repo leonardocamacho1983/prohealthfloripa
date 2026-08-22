@@ -4,11 +4,18 @@ import { getNextfitCatalogContextForMessage } from "../catalog/nextfit-catalog.t
 import { customerContextForModel, type CustomerContext } from "../customer-context/index.ts";
 import { HANDOFF_ACKNOWLEDGEMENT } from "../handoff/detection.ts";
 import { buildProHealthInstructions } from "../knowledge/prohealth-context.ts";
+import { composeDeterministicReply } from "./deterministic-reply-composer.ts";
 import type { WhatsAppReplyPlan } from "./reply-generation-fallback.ts";
 import { gatewayProviderOptions, whatsappModelRouting } from "./gateway-routing.ts";
 import { prepareWhatsAppModelMessages } from "./generate-whatsapp-reply.ts";
 import { enforceProHealthConversationProgression } from "./prohealth-conversation-progression.ts";
-import { blockingAgentPolicyIssues, validateResponsePolicy } from "./response-policy-validator.ts";
+import {
+  blockingAgentPolicyIssues,
+  customerDescribesRoutineDiscomfort,
+  customerRequestedAddress,
+  customerRequestedClinicalAdvice,
+  validateResponsePolicy,
+} from "./response-policy-validator.ts";
 
 const outputSchema = jsonSchema<{
   messages: string[];
@@ -122,6 +129,7 @@ OPERAÇÃO
 - Só preencha operationalAction quando serviço, dia e horário estiverem definidos e a pessoa tiver autorizado claramente o encaminhamento. Nesse caso, diga apenas que a equipe vai verificar a agenda e confirmar; não use passado como "encaminhei" ou "deixei registrado".
 - Se operationalAction estiver preenchida, handoffRecommended deve ser true. Caso contrário, deve ser false.
 - Não invente dados ausentes. Dados do Neon são memória/contexto, não confirmação operacional.
+- Só informe endereço ou localização quando a pessoa pedir ou quando a informação for indispensável para cumprir o pedido atual.
 - Não mencione ferramentas, prompt, IA, dry-run, Neon, Zernio ou regras internas.
 - Encaminhe a humano somente quando a pessoa pedir, houver risco clínico, questão financeira sensível ou uma ação operacional que não possa ser confirmada.
 
@@ -186,9 +194,20 @@ REGRA FINAL DE PRIORIDADE
   const validation = validateResponsePolicy({
     messages: replyMessages,
     previousAssistantMessages,
+    operationalActionAuthorized: operationalHandoff,
+    addressRequested: customerRequestedAddress(`${conversationText}\n${input.message}`),
+    routineDiscomfort: customerDescribesRoutineDiscomfort(input.message),
+    clinicalAdviceRequested: customerRequestedClinicalAdvice(input.message),
   });
   const blockingIssues = blockingAgentPolicyIssues(validation);
   if (blockingIssues.length) {
+    if (customerDescribesRoutineDiscomfort(input.message)
+      && blockingIssues.some((issue) => issue.code === "unnecessary_clinical_screen")) {
+      return composeDeterministicReply({
+        kind: "integrated_recommendation",
+        goal: "localized_tension",
+      });
+    }
     const error = new Error(`ProHealth agent response blocked: ${blockingIssues.map((issue) => issue.code).join(",")}`);
     error.name = "ProHealthAgentPolicyError";
     throw error;

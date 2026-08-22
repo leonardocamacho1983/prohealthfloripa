@@ -58,13 +58,13 @@ function integratedRecommendation(
     : "";
   if (goal === "relaxation") {
     return [
-      `Perfeito. Para desacelerar e relaxar, temos massagens que podem ajudar bastante, como a Relaxante. Também trabalhamos com termoterapias — banheira quente, fria ou contraste. Para esse objetivo, a quente combina muito bem. As duas abordagens podem ser combinadas, e o profissional ajusta a técnica na chegada, se necessário.${location}`,
-      "Qual caminho parece melhor para você: massagem, termoterapia ou combinar as duas?",
+      `Poxa, isso pode ser bem desconfortável. Para desacelerar e relaxar o corpo como um todo, a Relaxante costuma fazer mais sentido. O profissional ajusta a abordagem quando você chegar.${location}`,
+      "Quer seguir com a Relaxante e conhecer os horários?",
     ];
   }
   return [
-    `Perfeito. Para tensão localizada, temos massagens que podem ajudar bastante: a Miofascial é mais direcionada; se o foco for relaxar, a Relaxante tende a combinar melhor. Também trabalhamos com termoterapias — banheira quente, fria ou contraste. Para relaxamento e tensão, a quente combina muito bem. As duas abordagens podem ser combinadas, e o profissional ajusta a técnica na chegada, se necessário.${location}`,
-    "Qual caminho parece melhor para você: massagem, termoterapia ou combinar as duas?",
+    `Poxa, isso é bem desconfortável. Para uma tensão localizada, a Miofascial costuma fazer mais sentido; se você também busca relaxar, a Relaxante pode ajudar. O profissional ajusta a abordagem quando você chegar.${location}`,
+    "Qual delas faz mais sentido para você: Miofascial ou Relaxante?",
   ];
 }
 
@@ -122,7 +122,7 @@ export function composeDeterministicReply(spec: DeterministicReplySpec): Determi
   if (spec.kind === "integrated_recommendation") {
     return {
       messages: integratedRecommendation(spec.goal, spec.includeAddress),
-      answeredTopics: ["integrated_service_recommendation", "thermotherapy_complement"],
+      answeredTopics: ["service_recommendation"],
       needsClarification: true,
       handoffRecommended: false,
       generationMode: "deterministic_journey",

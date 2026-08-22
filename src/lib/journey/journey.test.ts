@@ -472,14 +472,16 @@ test("common localized complaints use an integrated path without hard-coding one
       goal: decision.action.goal,
     });
     assert.equal(reply.messages.length, 2);
-    assert.match(reply.messages[0], /massagens que podem ajudar bastante/i);
-    assert.match(reply.messages[0], /banheira quente, fria ou contraste/i);
-    assert.match(reply.messages[1], /massagem, termoterapia ou combinar as duas/i);
+    assert.match(reply.messages[0], /tensão localizada/i);
+    assert.match(reply.messages[0], /Miofascial/i);
+    assert.match(reply.messages[0], /Relaxante/i);
+    assert.match(reply.messages[1], /Miofascial ou Relaxante/i);
+    assert.doesNotMatch(reply.messages.join("\n"), /termoterapia|endere[cç]o/i);
     assert.doesNotMatch(reply.messages.join("\n"), /se (?:você )?quiser/i);
   }
 });
 
-test("an integrated thermotherapy mention is remembered without consuming the later promotional offer", () => {
+test("a natural discomfort recommendation stores the concrete massage choices", () => {
   let state = reduceJourneyState(initialJourneyState(), {
     messages: ["Estou com tensão nas costas e quero relaxar"],
     revision: 1,
@@ -495,13 +497,12 @@ test("an integrated thermotherapy mention is remembered without consuming the la
     action: firstDecision.action,
     messages: reply.messages,
   });
-  assert.equal(state.dialogue.thermotherapyMentioned, true);
+  assert.equal(state.dialogue.thermotherapyMentioned, undefined);
+  assert.equal(state.dialogue.lastQuestion, "service_choice");
+  assert.deepEqual(state.recommendedServices, ["Miofascial", "Relaxante"]);
   assert.equal(state.offers.hot_bath, undefined);
 
-  state = reduceJourneyState(state, { messages: ["massagem"], revision: 2 });
-  const massageDecision = decideJourneyAction(state);
-  assert.equal(massageDecision.action.type, "recommend_service");
-  state = reduceJourneyState(state, { messages: ["quero a Relaxante"], revision: 3 });
+  state = reduceJourneyState(state, { messages: ["quero a Relaxante"], revision: 2 });
   const selected = decideJourneyAction(state);
   assert.equal(selected.action.type, "present_selected_service");
   assert.equal(selected.action.type === "present_selected_service" && selected.action.offerHotBath, true);

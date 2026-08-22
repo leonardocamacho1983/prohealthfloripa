@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CustomerContext } from "../customer-context/index.ts";
+import { HANDOFF_ACKNOWLEDGEMENT } from "../handoff/detection.ts";
 import type { HandoffStore } from "../handoff/types.ts";
 import { initialJourneyState, type ConversationJourneyState } from "../journey/types.ts";
 import type { WhatsAppProvider } from "../whatsapp/provider.ts";
@@ -605,22 +606,22 @@ test("a short acceptance cannot revive an old or non-adjacent handoff offer", as
   assert.equal(generated, true);
 });
 
-test("failed handoff acknowledgement keeps the conversation active and retries idempotently", async () => {
+test("failed handoff acknowledgement never returns ownership to the agent", async () => {
   const repository = new TurnRepository(["Quero falar com uma pessoa"]);
   const provider = new TurnProvider();
   provider.failNextSend = true;
 
   await assert.rejects(processConversationTurn({ conversationId: "conversation", observedRevision: 1,
     repository, provider, generateReply: reply() }), /temporary provider failure/);
-  assert.equal(repository.status, "active");
-  assert.equal(repository.handoffRequested, false);
+  assert.equal(repository.status, "human_requested");
+  assert.equal(repository.handoffRequested, true);
   assert.equal(repository.releasedState, "failed");
 
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
     repository, provider, generateReply: reply() });
-  assert.equal(result, "handoff_requested");
+  assert.equal(result, "human_silent");
   assert.equal(repository.handoffRequested, true);
-  assert.equal(provider.sent.length, 1);
+  assert.equal(provider.sent.length, 0);
 });
 
 test("handoff notification failure cannot block acknowledgement or human ownership", async () => {
@@ -673,7 +674,7 @@ test("exhausted AI generation sends a visible fallback and opens handoff instead
   assert.equal(result, "handoff_requested");
   assert.equal(repository.handoffRequested, true);
   assert.equal(provider.sent.length, 1);
-  assert.match(provider.sent[0] ?? "", /sem você precisar repetir/i);
+  assert.equal(provider.sent[0], HANDOFF_ACKNOWLEDGEMENT);
   assert.equal(repository.releasedState, undefined);
 });
 
@@ -715,13 +716,14 @@ test("journey-assisted replies are blocked when the model invents a booking conf
   assert.equal(result, "handoff_requested");
   assert.equal(repository.handoffSource, "safety_rule");
   assert.equal(provider.sent.length, 1);
-  assert.match(provider.sent[0] ?? "", /responder com precisão/i);
+  assert.equal(provider.sent[0], HANDOFF_ACKNOWLEDGEMENT);
   assert.doesNotMatch(provider.sent[0] ?? "", /marcado|agendado/i);
 });
 
 test("a structured schedule request opens handoff only after explicit authorization and complete details", async () => {
   const repository = new TurnRepository(["Quero massagem Relaxante amanhã às 14h. Pode encaminhar."]);
   const provider = new TurnProvider();
+  provider.onSend = () => assert.equal(repository.status, "human_requested");
 
   const result = await processConversationTurn({ conversationId: "conversation", observedRevision: 1,
     repository, provider, generateReply: async () => ({
@@ -738,6 +740,23 @@ test("a structured schedule request opens handoff only after explicit authorizat
   assert.equal(repository.handoffRequested, true);
   assert.equal(repository.handoffSource, "customer");
   assert.equal(provider.sent.length, 1);
+});
+
+test("never confirms a handoff whose ownership transition was not persisted", async () => {
+  const repository = new TurnRepository(["Quero falar com uma pessoa"]);
+  repository.requestHandoff = async () => {};
+  const provider = new TurnProvider();
+
+  await assert.rejects(processConversationTurn({
+    conversationId: "conversation",
+    observedRevision: 1,
+    repository,
+    provider,
+    generateReply: reply(),
+  }), /Handoff transition was not persisted/);
+
+  assert.equal(repository.status, "active");
+  assert.equal(provider.sent.length, 0);
 });
 
 test("active journey presents Relaxante facts and the post-Pilates bath without invoking the model", async () => {
@@ -819,11 +838,11 @@ test("active semantic planner owns a Pilates burst and preserves the exact 14h r
     },
   });
 
-  assert.equal(result, "replied");
+  assert.equal(result, "handoff_requested");
   assert.deepEqual(receivedPlan, semanticPlan);
   assert.equal(provider.sent.length, 1);
   assert.doesNotMatch(provider.sent[0] ?? "", /qual per[ií]odo|recovery|banheira/i);
-  assert.match(provider.sent[0] ?? "", /confirmar a disponibilidade/i);
+  assert.equal(provider.sent[0], HANDOFF_ACKNOWLEDGEMENT);
 });
 
 test("the original sandbox Relaxante request advances commercially without robotic repetition", async () => {
@@ -872,12 +891,14 @@ test("a general localized complaint recommends integrated paths in two bubbles w
   assert.equal(result, "replied");
   assert.equal(generated, false);
   assert.equal(provider.sent.length, 2);
-  assert.match(provider.sent[0] ?? "", /massagens que podem ajudar bastante/i);
-  assert.match(provider.sent[0] ?? "", /banheira quente, fria ou contraste/i);
-  assert.match(provider.sent[0] ?? "", /Rua Vera Linhares de Andrade, 2063/i);
-  assert.match(provider.sent[1] ?? "", /Qual caminho parece melhor/i);
+  assert.match(provider.sent[0] ?? "", /tensão localizada/i);
+  assert.match(provider.sent[0] ?? "", /Massagem Miofascial/i);
+  assert.match(provider.sent[0] ?? "", /Massagem Relaxante/i);
+  assert.doesNotMatch(provider.sent.join("\n"), /Rua Vera Linhares de Andrade|termoterapia/i);
+  assert.match(provider.sent[1] ?? "", /Massagem Miofascial ou Massagem Relaxante/i);
   assert.doesNotMatch(provider.sent.join("\n"), /se (?:você )?quiser/i);
-  assert.equal(repository.journeyState?.dialogue.thermotherapyMentioned, true);
+  assert.equal(repository.journeyState?.dialogue.thermotherapyMentioned, undefined);
+  assert.equal(repository.journeyState?.dialogue.lastQuestion, "service_choice");
   assert.equal(repository.journeyState?.offers.hot_bath, undefined);
 });
 
@@ -917,10 +938,10 @@ test("semantic understanding routes free-form pain and a greeting into the integ
   assert.equal(enriched, 1);
   assert.equal(generated, false);
   assert.equal(provider.sent.length, 2);
-  assert.match(provider.sent[0] ?? "", /^Oi, boa tarde! Tudo ótimo por aqui 😊 Perfeito\./);
-  assert.match(provider.sent[0] ?? "", /massagens que podem ajudar bastante/i);
-  assert.match(provider.sent[0] ?? "", /Rua Vera Linhares de Andrade, 2063/i);
-  assert.match(provider.sent[1] ?? "", /Qual caminho parece melhor/i);
+  assert.match(provider.sent[0] ?? "", /^Oi, boa tarde! Tudo ótimo por aqui 😊 Poxa,/);
+  assert.match(provider.sent[0] ?? "", /Massagem Miofascial/i);
+  assert.doesNotMatch(provider.sent.join("\n"), /Rua Vera Linhares de Andrade/i);
+  assert.match(provider.sent[1] ?? "", /Massagem Miofascial ou Massagem Relaxante/i);
 });
 
 test("a cervical conversation progresses from complaint to concrete choice without repeating the pitch", async () => {
@@ -950,10 +971,10 @@ test("a cervical conversation progresses from complaint to concrete choice witho
   });
 
   assert.equal(await run(), "replied");
-  assert.match(provider.sent[0] ?? "", /^Oi, bom dia! Tudo ótimo por aqui 😊 Perfeito\./);
+  assert.match(provider.sent[0] ?? "", /^Oi, bom dia! Tudo ótimo por aqui 😊 Poxa,/);
   assert.match(provider.sent[0] ?? "", /Miofascial/);
   assert.match(provider.sent[0] ?? "", /Relaxante/);
-  assert.match(provider.sent[1] ?? "", /massagem, termoterapia ou combinar as duas/i);
+  assert.match(provider.sent[1] ?? "", /Massagem Miofascial ou Massagem Relaxante/i);
 
   repository.addInbound("É um mal-estar mesmo, talvez só um mal jeito. O que vocês poderiam fazer para me ajudar?");
   assert.equal(await run(), "replied");
@@ -995,8 +1016,8 @@ test("a greeting already answered in the episode is not repeated before the comp
   assert.equal(await run(), "replied");
 
   assert.equal((provider.sent.join("\n").match(/Tudo ótimo por aqui/gi) ?? []).length, 1);
-  assert.match(provider.sent.at(-2) ?? "", /^Perfeito\. Para tensão localizada/i);
-  assert.match(provider.sent.at(-1) ?? "", /massagem, termoterapia ou combinar as duas/i);
+  assert.match(provider.sent.at(-2) ?? "", /^Poxa, isso é bem desconfortável/i);
+  assert.match(provider.sent.at(-1) ?? "", /Massagem Miofascial ou Massagem Relaxante/i);
 });
 
 test("the current peitoral flow preserves the new episode and hands off massage plus accepted bath", async () => {
@@ -1053,8 +1074,7 @@ test("the current peitoral flow preserves the new episode and hands off massage 
   assert.equal(await run(), "handoff_requested");
   assert.equal(repository.handoffRequested, true);
   assert.equal(repository.completeJourneyHandoffAttempts, 1);
-  assert.match(provider.sent.at(-1) ?? "", /Relaxante \+ banheira quente, amanhã, às 14:30/i);
-  assert.match(provider.sent.at(-1) ?? "", /só fica reservado depois/i);
+  assert.equal(provider.sent.at(-1), HANDOFF_ACKNOWLEDGEMENT);
   assert.equal(generated, 0);
 });
 
@@ -1105,9 +1125,10 @@ test("old journey meaning cannot block semantic understanding of the current com
   assert.equal(interpreted, 1);
   assert.equal(generated, false);
   assert.equal(provider.sent.length, 2);
-  assert.match(provider.sent[0] ?? "", /massagens que podem ajudar bastante/i);
-  assert.match(provider.sent[0] ?? "", /banheira quente, fria ou contraste/i);
-  assert.match(provider.sent[1] ?? "", /Qual caminho parece melhor/i);
+  assert.match(provider.sent[0] ?? "", /Massagem Miofascial/i);
+  assert.match(provider.sent[0] ?? "", /Massagem Relaxante/i);
+  assert.match(provider.sent[1] ?? "", /Massagem Miofascial ou Massagem Relaxante/i);
+  assert.doesNotMatch(provider.sent.join("\n"), /termoterapia/i);
   assert.doesNotMatch(provider.sent.join("\n"), /comercial|site oficial|instagram/i);
 });
 
@@ -1179,7 +1200,7 @@ test("a reset followed by a free-form complaint is understood in the same turn",
   assert.doesNotMatch(semanticMessage, /começar do zero/i);
   assert.match(semanticMessage, /ombro está uma desgraça/i);
   assert.equal(provider.sent.length, 2);
-  assert.match(provider.sent[0] ?? "", /massagens que podem ajudar bastante/i);
+  assert.match(provider.sent[0] ?? "", /Massagem Miofascial/i);
 });
 
 test("internal operational language from the model is blocked before delivery", async () => {
@@ -1197,7 +1218,7 @@ test("internal operational language from the model is blocked before delivery", 
   assert.equal(result, "handoff_requested");
   assert.equal(repository.handoffRequested, true);
   assert.doesNotMatch(provider.sent.join("\n"), /avaliação comercial/i);
-  assert.match(provider.sent.join("\n"), /responder com precisão/i);
+  assert.equal(provider.sent[0], HANDOFF_ACKNOWLEDGEMENT);
 });
 
 test("semantic interpretation fails open to the grounded reply generator", async () => {
@@ -1240,7 +1261,7 @@ test("a Nextfit customer receives the integrated recommendation without a redund
 
   assert.equal(result, "replied");
   assert.equal(enrichmentCalls, 1);
-  assert.match(provider.sent[0] ?? "", /massagens que podem ajudar bastante/i);
+  assert.match(provider.sent[0] ?? "", /Massagem Miofascial/i);
   assert.doesNotMatch(provider.sent.join("\n"), /Rua Vera Linhares de Andrade/i);
 });
 
@@ -1282,8 +1303,7 @@ test("the complete Leonardo journey keeps state across short turns and hands off
   assert.equal(generated, 0);
   assert.equal((transcript.match(/R\$ 270/g) ?? []).length, 1);
   assert.equal((transcript.match(/banheira quente/gi) ?? []).length, 1);
-  assert.match(provider.sent.at(-1) ?? "", /Relaxante, amanhã, às 15:30/i);
-  assert.match(provider.sent.at(-1) ?? "", /só fica reservado depois/i);
+  assert.equal(provider.sent.at(-1), HANDOFF_ACKNOWLEDGEMENT);
   assert.equal(repository.completeJourneyHandoffAttempts, 1);
 });
 
@@ -1360,9 +1380,7 @@ test("active journey offers the bath before summarizing a split schedule and nev
   assert.equal(repository.completeJourneyHandoffAttempts, 1);
   assert.deepEqual(repository.completedStates, ["replied", "handoff"]);
   assert.equal(provider.sent.length, 2);
-  assert.match(provider.sent[1] ?? "", /Relaxante, amanhã, às 15:30/i);
-  assert.match(provider.sent[1] ?? "", /confirmar a disponibilidade/i);
-  assert.match(provider.sent[1] ?? "", /só fica reservado depois/i);
+  assert.equal(provider.sent[1], HANDOFF_ACKNOWLEDGEMENT);
   assert.doesNotMatch(provider.sent[1] ?? "", /(?:agendei|está agendado|horário garantido)/i);
   assert.equal(repository.journeyState?.stage, "human_handoff");
   assert.equal(repository.journeyState?.scheduling.status, "handed_off");
@@ -1400,7 +1418,7 @@ test("explicit scheduling authorization uses the selected service persisted by a
 
   assert.equal(result, "handoff_requested");
   assert.equal(generated, false);
-  assert.match(provider.sent[0] ?? "", /Relaxante, amanhã, às 15:30/i);
+  assert.equal(provider.sent[0], HANDOFF_ACKNOWLEDGEMENT);
   assert.doesNotMatch(provider.sent[0] ?? "", /Bia continuar/i);
 });
 
@@ -1486,7 +1504,7 @@ test("a transient handoff failure retries ownership without sending the schedule
     journeyMode: "active",
     generateReply: reply(),
   }), /temporary journey handoff failure/);
-  assert.equal(provider.sent.length, 1);
+  assert.equal(provider.sent.length, 0);
   assert.equal(repository.handoffRequested, false);
   assert.equal(repository.savedJourneyStates.length, 0);
 
@@ -1531,7 +1549,7 @@ test("a newer inbound after the schedule summary cannot cancel the promised huma
   assert.equal(result, "handoff_requested");
   assert.equal(provider.sent.length, 1);
   assert.equal(repository.status, "human_requested");
-  assert.equal(repository.processedRevision, 4);
+  assert.equal(repository.processedRevision, 3);
   assert.equal(repository.completeJourneyHandoffAttempts, 1);
 });
 

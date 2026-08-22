@@ -6,7 +6,7 @@ import { blockingAgentPolicyIssues, validateResponsePolicy } from "./response-po
 test("accepts a concise grounded schedule handoff", () => {
   const result = validateResponsePolicy({ messages: [
     "Perfeito: Relaxante, amanhã, às 15:30. Vou encaminhar para a equipe confirmar a disponibilidade; o horário só fica reservado depois dessa confirmação.",
-  ] });
+  ], operationalActionAuthorized: true });
   assert.equal(result.valid, true);
 });
 
@@ -44,9 +44,43 @@ test("blocks claims that an operational request was already persisted", () => {
     assert.equal(blockingAgentPolicyIssues(validation)
       .some((issue) => issue.code === "false_operational_completion"), true, message);
   }
+  const unbacked = validateResponsePolicy({
+    messages: ["Vou encaminhar o pedido para a equipe verificar a agenda e confirmar."],
+  });
+  assert.equal(unbacked.issues.some((issue) => issue.code === "unbacked_operational_promise"), true);
   assert.equal(validateResponsePolicy({
     messages: ["Vou encaminhar o pedido para a equipe verificar a agenda e confirmar."],
+    operationalActionAuthorized: true,
   }).valid, true);
+});
+
+test("blocks clinical overreach and unsolicited address for routine discomfort", () => {
+  const validation = validateResponsePolicy({
+    messages: [
+      "Torcicolo costuma estar ligado à tensão muscular. Se houve queda, febre ou perda de força, procure avaliação. Quer o endereço?",
+    ],
+    routineDiscomfort: true,
+    clinicalAdviceRequested: false,
+    addressRequested: false,
+  });
+  assert.equal(validation.issues.some((issue) => issue.code === "unnecessary_clinical_screen"), true);
+  assert.equal(validation.issues.some((issue) => issue.code === "unsolicited_address"), true);
+  assert.deepEqual(blockingAgentPolicyIssues(validation).map((issue) => issue.code), [
+    "unsolicited_address",
+    "unnecessary_clinical_screen",
+  ]);
+});
+
+test("allows a natural service recommendation for routine discomfort", () => {
+  const validation = validateResponsePolicy({
+    messages: [
+      "Poxa, isso é bem desconfortável. Para uma tensão localizada, a Massagem Miofascial costuma fazer mais sentido; se você também quer relaxar, a Massagem Relaxante pode ajudar. O profissional ajusta a abordagem quando você chegar.",
+    ],
+    routineDiscomfort: true,
+    clinicalAdviceRequested: false,
+    addressRequested: false,
+  });
+  assert.equal(validation.valid, true);
 });
 
 test("rejects repeated commercial facts unless the caller explicitly allows them", () => {

@@ -254,9 +254,12 @@ export function applyDeliveredJourneyOutcome(
     next.dialogue.lastQuestion = "service_choice";
     delete next.dialogue.pendingCommitment;
   } else if (input.action.type === "recommend_integrated_paths") {
-    next.dialogue.thermotherapyMentioned = true;
+    next.serviceFamily = "massage";
+    next.recommendedServices = input.action.goal === "relaxation"
+      ? ["Relaxante"]
+      : ["Miofascial", "Relaxante"];
     next.stage = "recommendation";
-    next.dialogue.lastQuestion = "path_choice";
+    next.dialogue.lastQuestion = "service_choice";
     delete next.dialogue.pendingCommitment;
   } else if (input.action.type === "clarify_path_choice") {
     next.dialogue.lastQuestion = "path_choice";

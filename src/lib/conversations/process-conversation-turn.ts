@@ -4,7 +4,12 @@ import { composeDeterministicReply } from "../ai/deterministic-reply-composer.ts
 import { repairAssistedReplyMessages } from "../ai/assisted-reply-repair.ts";
 import { qualifyMassageServiceNames } from "../ai/massage-service-display.ts";
 import type { WhatsAppReplyPlan } from "../ai/generate-whatsapp-reply.ts";
-import { validateResponsePolicy } from "../ai/response-policy-validator.ts";
+import {
+  customerDescribesRoutineDiscomfort,
+  customerRequestedAddress,
+  customerRequestedClinicalAdvice,
+  validateResponsePolicy,
+} from "../ai/response-policy-validator.ts";
 import { shouldLoadNextfitCatalogContext } from "../catalog/nextfit-catalog.ts";
 import { buildCustomerContext, replaceConversationHistory, type CustomerContext } from "../customer-context/index.ts";
 import { isPossiblePersonalAccountFollowUp } from "../customer-context/personal-intent.ts";
@@ -83,11 +88,6 @@ export class EmptyTurnInvariantError extends Error {
   }
 }
 
-const GENERATION_FAILURE_REPLY =
-  "Recebi sua mensagem, mas tive uma instabilidade para concluir a resposta. Já deixei tudo registrado para nossa equipe continuar por aqui sem você precisar repetir.";
-const MODEL_POLICY_FALLBACK_REPLY =
-  "Quero te responder com precisão. Vou encaminhar essa parte para a equipe continuar por aqui, sem você precisar repetir.";
-
 function normalizeReplyBubble(message: string): string {
   return message
     .normalize("NFKC")
@@ -130,12 +130,16 @@ const BLOCKING_ASSISTED_POLICY_ISSUES = new Set([
   "bubble_too_long",
   "too_many_questions",
   "false_booking_confirmation",
+  "false_operational_completion",
+  "unbacked_operational_promise",
   "hot_bath_before_pilates",
   "internal_language_leak",
   "deferred_value",
   "repeated_safety_screen",
   "repeated_professional_disclaimer",
   "address_permission_gate",
+  "unsolicited_address",
+  "unnecessary_clinical_screen",
   "asks_known_schedule_field",
   "premature_optional_offer",
   "unverified_availability_claim",
@@ -246,27 +250,6 @@ async function loadJourneyState(
   }
 }
 
-function normalizedScheduleEvidence(text: string): string {
-  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-}
-
-function matchingDeliveredScheduleSummary(
-  messages: readonly ConversationMessage[],
-  action: Extract<JourneyAction, { type: "schedule_handoff" }>,
-): ConversationMessage | undefined {
-  const service = normalizedScheduleEvidence(action.service);
-  const day = normalizedScheduleEvidence(action.day);
-  return [...messages].reverse().find((message) => {
-    if (message.role !== "assistant" || message.responseRevision === undefined) return false;
-    const text = normalizedScheduleEvidence(message.content);
-    return text.includes(service)
-      && text.includes(day)
-      && text.includes(action.time)
-      && text.includes("confirmar a disponibilidade")
-      && text.includes("so fica reservado depois");
-  });
-}
-
 async function emitJourneyObservation(
   observer: ((observation: JourneyTurnObservation) => Promise<void> | void) | undefined,
   observation: JourneyTurnObservation,
@@ -278,6 +261,13 @@ async function emitJourneyObservation(
     console.warn("Conversation journey observation failed", {
       error: error instanceof Error ? error.name : "UnknownError",
     });
+  }
+}
+
+async function ensureHumanOwnership(store: HandoffStore, conversationId: string): Promise<void> {
+  const state = await store.getConversationState(conversationId);
+  if (state.status !== "human_requested" && state.status !== "human_active") {
+    throw new Error("Handoff transition was not persisted");
   }
 }
 
@@ -422,8 +412,8 @@ export async function processConversationTurn(input: {
     const summary = buildHandoffSummary(history, handoff.reason);
     const idempotencyKey = `zernio-handoff-${turn.conversationId}-${turn.revision}`;
     try {
-      // Acknowledge before switching to human mode. A provider failure keeps
-      // the active turn retryable instead of creating a silent handoff.
+      // Persist human ownership before telling the customer the transfer
+      // happened. The pending outbound is the durable outbox record.
       const reservation = await input.repository.reserveOutbound({
         conversationId: turn.conversationId,
         revision: turn.revision,
@@ -436,6 +426,10 @@ export async function processConversationTurn(input: {
         await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
         return "stale";
       }
+      await input.repository.requestHandoff({ conversationId: turn.conversationId,
+        providerAccountId: turn.accountId, providerConversationId: turn.providerConversationId,
+        reason: handoff.reason, source: handoff.source, summary });
+      await ensureHumanOwnership(input.repository, turn.conversationId);
       if (reservation === "reserved") {
         try {
           await input.provider.sendText({ accountId: turn.accountId,
@@ -447,9 +441,6 @@ export async function processConversationTurn(input: {
           throw error;
         }
       }
-      await input.repository.requestHandoff({ conversationId: turn.conversationId,
-        providerAccountId: turn.accountId, providerConversationId: turn.providerConversationId,
-        reason: handoff.reason, source: handoff.source, summary });
     } catch (error) {
       await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "failed" });
       throw error;
@@ -543,6 +534,10 @@ export async function processConversationTurn(input: {
     context = replaceConversationHistory(context,
       applyResetToHistory(episode.messages, plan.resetRequested));
     const activeMessages = context.conversation.recentMessages;
+    const activeCustomerText = activeMessages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content)
+      .join("\n");
     const currentIds = new Set(plan.messages.map((message) => message.id));
     const priorAssistantMessageRecords = activeMessages
       .filter((message) => message.role === "assistant");
@@ -558,7 +553,6 @@ export async function processConversationTurn(input: {
     let journeyValidationIssues: string[] = [];
     let replySource: "social" | "model" | "deterministic_journey" = "model";
     let journeyPlanningMs: number | undefined;
-    let previouslyDeliveredScheduleSummary: ConversationMessage | undefined;
     let semanticPlan: SemanticTurnPlan | undefined;
     let semanticPlanIssues: string[] = [];
 
@@ -668,12 +662,17 @@ export async function processConversationTurn(input: {
         ? composeResetReply(context.identity.firstName)
         : composeJourneyReply(decision.action, {
           includeVisitorAddress: context.identity.relationshipStatus !== "customer"
-            && !observedState.dialogue.addressSent,
+            && !observedState.dialogue.addressSent
+            && customerRequestedAddress(activeCustomerText),
         });
       if (candidateReply) {
         const validation = validateResponsePolicy({
           messages: candidateReply.messages,
           previousAssistantMessages: priorAssistantMessages,
+          operationalActionAuthorized: decision.action.type === "schedule_handoff",
+          addressRequested: customerRequestedAddress(activeCustomerText),
+          routineDiscomfort: customerDescribesRoutineDiscomfort(rawTurnText),
+          clinicalAdviceRequested: customerRequestedClinicalAdvice(rawTurnText),
         });
         journeyValidationIssues = validation.issues.map((issue) => issue.code);
         if (activeJourney && (resetOnly || !semanticPlannerControlsReply) && validation.valid) {
@@ -682,12 +681,6 @@ export async function processConversationTurn(input: {
             ? { type: "assisted", reason: "Reinício conversacional confirmado." }
             : decision.action;
           replySource = "deterministic_journey";
-          if (decision.action.type === "schedule_handoff") {
-            previouslyDeliveredScheduleSummary = matchingDeliveredScheduleSummary(
-              priorAssistantMessageRecords,
-              decision.action,
-            );
-          }
         }
       }
       journeyPlanningMs = Date.now() - planningStartedAt;
@@ -717,7 +710,8 @@ export async function processConversationTurn(input: {
                 professionalAdjustmentMentioned: Boolean(
                   journeyStateBeforeDelivery.dialogue.professionalAdjustmentMentioned,
                 ),
-                includeVisitorAddress: context.identity.relationshipStatus !== "customer",
+                includeVisitorAddress: context.identity.relationshipStatus !== "customer"
+                  && customerRequestedAddress(activeCustomerText),
                 addressSent: Boolean(journeyStateBeforeDelivery.dialogue.addressSent),
               }),
             };
@@ -730,6 +724,12 @@ export async function processConversationTurn(input: {
             professionalAdjustmentMentioned: Boolean(
               journeyStateBeforeDelivery?.dialogue.professionalAdjustmentMentioned,
             ),
+            operationalActionAuthorized: Boolean(
+              responsePlan.operationalAction?.customerAuthorized,
+            ),
+            addressRequested: customerRequestedAddress(activeCustomerText),
+            routineDiscomfort: customerDescribesRoutineDiscomfort(rawTurnText),
+            clinicalAdviceRequested: customerRequestedClinicalAdvice(rawTurnText),
           });
           journeyValidationIssues = [...new Set([
             ...journeyValidationIssues,
@@ -737,7 +737,7 @@ export async function processConversationTurn(input: {
           ])];
           if (assistedValidation.issues.some((issue) => BLOCKING_ASSISTED_POLICY_ISSUES.has(issue.code))) {
             responsePlan = {
-              messages: [MODEL_POLICY_FALLBACK_REPLY],
+              messages: [HANDOFF_ACKNOWLEDGEMENT],
               answeredTopics: [],
               needsClarification: false,
               handoffRecommended: true,
@@ -754,7 +754,7 @@ export async function processConversationTurn(input: {
           error: error instanceof Error ? error.name : "UnknownError",
         });
         responsePlan = {
-          messages: [GENERATION_FAILURE_REPLY],
+          messages: [HANDOFF_ACKNOWLEDGEMENT],
           answeredTopics: [],
           needsClarification: false,
           handoffRecommended: true,
@@ -784,41 +784,10 @@ export async function processConversationTurn(input: {
       });
     }
     if (!messages.length) throw new Error("Empty response plan");
-    if ((input.preSendGraceMs ?? 0) > 0) {
-      await new Promise((resolve) => setTimeout(resolve, input.preSendGraceMs));
-    }
-    typingPresence.stop();
-    const responseWasAlreadyDelivered = Boolean(previouslyDeliveredScheduleSummary);
-    if (!responseWasAlreadyDelivered) {
-      for (const [bubbleIndex, text] of messages.entries()) {
-        const idempotencyKey = `zernio-turn-${turn.conversationId}-${turn.revision}-${bubbleIndex}`;
-        const reservation = await input.repository.reserveOutbound({ conversationId: turn.conversationId,
-          revision: turn.revision, token, bubbleIndex, content: text, idempotencyKey });
-        if (reservation === "stale") {
-          await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
-          return "stale";
-        }
-        if (reservation === "reserved") {
-          try {
-            await input.provider.sendText({ accountId: turn.accountId, conversationId: turn.providerConversationId,
-              idempotencyKey, text });
-            await input.repository.markOutboundSent({ idempotencyKey });
-          } catch (error) {
-            await input.repository.markOutboundFailed({ idempotencyKey });
-            throw error;
-          }
-        }
-        // A newer inbound revision makes the next reservation stale. The next
-        // turn sees the bubble already sent and answers only what remains.
-      }
-    }
-    const deliveredMessages = previouslyDeliveredScheduleSummary
-      ? [previouslyDeliveredScheduleSummary.content]
-      : messages;
     const deliveredJourneyState = journeyStateBeforeDelivery && deliveredJourneyAction
       ? applyDeliveredJourneyOutcome(journeyStateBeforeDelivery, {
         action: deliveredJourneyAction,
-        messages: deliveredMessages,
+        messages,
       })
       : undefined;
     const analysis = {
@@ -873,20 +842,37 @@ export async function processConversationTurn(input: {
         result,
       });
     };
+    if ((input.preSendGraceMs ?? 0) > 0) {
+      await new Promise((resolve) => setTimeout(resolve, input.preSendGraceMs));
+    }
+    typingPresence.stop();
     if (replySource === "deterministic_journey"
       && deliveredJourneyAction?.type === "schedule_handoff"
-      && deliveredJourneyState
+      && journeyStateBeforeDelivery
       && journeyRepository) {
       const reason = "Cliente informou serviço, dia e horário para a equipe confirmar a disponibilidade.";
       const history = await input.repository.getRecentMessages(turn.conversationId, 12);
       const summary = buildHandoffSummary(history, reason);
-      const handedOffJourneyState = applyDeliveredJourneyOutcome(deliveredJourneyState, {
+      const handedOffJourneyState = applyDeliveredJourneyOutcome(journeyStateBeforeDelivery, {
         action: deliveredJourneyAction,
-        messages: deliveredMessages,
+        messages: [HANDOFF_ACKNOWLEDGEMENT],
         handoffCompleted: true,
       });
-      const outboundRevision = previouslyDeliveredScheduleSummary?.responseRevision ?? turn.revision;
+      const outboundRevision = turn.revision;
       const outboundIdempotencyKey = `zernio-turn-${turn.conversationId}-${outboundRevision}-0`;
+      const reservation = await input.repository.reserveOutbound({
+        conversationId: turn.conversationId,
+        revision: turn.revision,
+        token,
+        bubbleIndex: 0,
+        content: HANDOFF_ACKNOWLEDGEMENT,
+        idempotencyKey: outboundIdempotencyKey,
+      });
+      if (reservation === "stale") {
+        await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
+        await observeJourneyResult("stale");
+        return "stale";
+      }
       let completed = true;
       if (journeyRepository.completeJourneyHandoff) {
         completed = await journeyRepository.completeJourneyHandoff({
@@ -913,6 +899,7 @@ export async function processConversationTurn(input: {
           source: "customer",
           summary,
         });
+        await ensureHumanOwnership(input.repository, turn.conversationId);
         await saveJourneyState(journeyRepository, turn.conversationId, handedOffJourneyState);
       }
       if (!completed) {
@@ -923,6 +910,20 @@ export async function processConversationTurn(input: {
         });
         await observeJourneyResult("stale");
         return "stale";
+      }
+      if (reservation === "reserved") {
+        try {
+          await input.provider.sendText({
+            accountId: turn.accountId,
+            conversationId: turn.providerConversationId,
+            idempotencyKey: outboundIdempotencyKey,
+            text: HANDOFF_ACKNOWLEDGEMENT,
+          });
+          await input.repository.markOutboundSent({ idempotencyKey: outboundIdempotencyKey });
+        } catch (error) {
+          await input.repository.markOutboundFailed({ idempotencyKey: outboundIdempotencyKey });
+          throw error;
+        }
       }
       if (input.notifyHandoff) {
         try {
@@ -953,14 +954,44 @@ export async function processConversationTurn(input: {
           : "Uma parte do pedido precisa de continuidade com a equipe.";
       const history = await input.repository.getRecentMessages(turn.conversationId, 12);
       const summary = buildHandoffSummary(history, reason);
+      const source = generationFailed
+        ? "system_failure" as const
+        : responsePlan.operationalAction?.type === "request_schedule_confirmation"
+          ? "customer" as const
+          : "safety_rule" as const;
+      const idempotencyKey = `zernio-turn-${turn.conversationId}-${turn.revision}-0`;
+      const reservation = await input.repository.reserveOutbound({
+        conversationId: turn.conversationId,
+        revision: turn.revision,
+        token,
+        bubbleIndex: 0,
+        content: HANDOFF_ACKNOWLEDGEMENT,
+        idempotencyKey,
+      });
+      if (reservation === "stale") {
+        await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
+        await observeJourneyResult("stale");
+        return "stale";
+      }
       await input.repository.requestHandoff({ conversationId: turn.conversationId,
         providerAccountId: turn.accountId, providerConversationId: turn.providerConversationId,
-        reason, source: generationFailed
-          ? "system_failure"
-          : responsePlan.operationalAction?.type === "request_schedule_confirmation"
-            ? "customer"
-            : "safety_rule",
+        reason, source,
         summary });
+      await ensureHumanOwnership(input.repository, turn.conversationId);
+      if (reservation === "reserved") {
+        try {
+          await input.provider.sendText({
+            accountId: turn.accountId,
+            conversationId: turn.providerConversationId,
+            idempotencyKey,
+            text: HANDOFF_ACKNOWLEDGEMENT,
+          });
+          await input.repository.markOutboundSent({ idempotencyKey });
+        } catch (error) {
+          await input.repository.markOutboundFailed({ idempotencyKey });
+          throw error;
+        }
+      }
       if (input.notifyHandoff) {
         try {
           await input.notifyHandoff({ conversationId: turn.conversationId,
@@ -975,6 +1006,27 @@ export async function processConversationTurn(input: {
       }
       await observeJourneyResult("handoff_requested");
       return "handoff_requested";
+    }
+    for (const [bubbleIndex, text] of messages.entries()) {
+      const idempotencyKey = `zernio-turn-${turn.conversationId}-${turn.revision}-${bubbleIndex}`;
+      const reservation = await input.repository.reserveOutbound({ conversationId: turn.conversationId,
+        revision: turn.revision, token, bubbleIndex, content: text, idempotencyKey });
+      if (reservation === "stale") {
+        await input.repository.releaseTurn({ conversationId: turn.conversationId, token, state: "stale" });
+        return "stale";
+      }
+      if (reservation === "reserved") {
+        try {
+          await input.provider.sendText({ accountId: turn.accountId, conversationId: turn.providerConversationId,
+            idempotencyKey, text });
+          await input.repository.markOutboundSent({ idempotencyKey });
+        } catch (error) {
+          await input.repository.markOutboundFailed({ idempotencyKey });
+          throw error;
+        }
+      }
+      // A newer inbound revision makes the next reservation stale. The next
+      // turn sees the bubble already sent and answers only what remains.
     }
     const completed = closureConsent && input.repository.completeAutomaticClosure
       ? await input.repository.completeAutomaticClosure({ conversationId: turn.conversationId,

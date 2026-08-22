@@ -9,10 +9,12 @@ test("presents an integrated recommendation in the approved two-bubble structure
     goal: "localized_tension",
   });
   assert.equal(reply.messages.length, 2);
-  assert.match(reply.messages[0], /massagens que podem ajudar bastante/i);
-  assert.match(reply.messages[0], /termoterapias/i);
-  assert.match(reply.messages[0], /profissional ajusta a técnica na chegada/i);
-  assert.equal(reply.messages[1], "Qual caminho parece melhor para você: massagem, termoterapia ou combinar as duas?");
+  assert.match(reply.messages[0], /tensão localizada/i);
+  assert.match(reply.messages[0], /Miofascial/i);
+  assert.match(reply.messages[0], /Relaxante/i);
+  assert.match(reply.messages[0], /profissional ajusta a abordagem quando você chegar/i);
+  assert.equal(reply.messages[1], "Qual delas faz mais sentido para você: Miofascial ou Relaxante?");
+  assert.doesNotMatch(reply.messages.join("\n"), /termoterapia|endere[cç]o/i);
 });
 
 test("adds the confirmed address only when requested for a non-customer journey", () => {
