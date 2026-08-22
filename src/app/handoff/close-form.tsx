@@ -27,10 +27,11 @@ export function CloseHandoffForm({ conversationId, reasons, assignmentVersion, i
         body: new FormData(event.currentTarget),
       });
       if (!response.ok) {
+        if (response.status === 409) router.refresh();
         setError(response.status === 400
           ? "Escolha um motivo válido para encerrar."
           : response.status === 409
-            ? "Chegou uma mensagem nova ou o atendimento mudou. Atualize a página antes de encerrar."
+            ? "Chegou uma mensagem nova ou o atendimento mudou. A conversa foi atualizada automaticamente."
             : "Não foi possível encerrar o atendimento.");
         return;
       }

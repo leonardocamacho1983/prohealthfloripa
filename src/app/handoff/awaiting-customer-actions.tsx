@@ -19,7 +19,10 @@ export function AwaitingCustomerActions({ conversationId, assignmentVersion, awa
     try {
       const response = await fetch(`/api/handoff/${conversationId}/waiting`, { method: "POST", body: data });
       if (!response.ok) {
-        setError(response.status === 409 ? "A conversa mudou. Atualize a página." : "Não foi possível atualizar o estado.");
+        if (response.status === 409) router.refresh();
+        setError(response.status === 409
+          ? "A conversa mudou e foi atualizada automaticamente. Confira o novo estado."
+          : "Não foi possível atualizar o estado.");
         return;
       }
       router.refresh();

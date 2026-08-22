@@ -46,8 +46,9 @@ export function QuickReplyComposer({ conversationId, quickReplies, assignmentVer
         body: data,
       });
       if (!response.ok) {
+        if (response.status === 409) router.refresh();
         setError(response.status === 409
-          ? "A conversa mudou. Atualize a página antes de enviar."
+          ? "A conversa mudou e foi atualizada automaticamente. Confira o novo estado e envie novamente."
           : response.status === 401 || response.status === 403
             ? "Sua sessão não permite enviar mensagens. Atualize a página."
             : response.status === 503

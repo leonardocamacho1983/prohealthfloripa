@@ -2,9 +2,11 @@ import { handleCallback } from "@vercel/queue";
 import { randomUUID } from "node:crypto";
 
 import { generateWhatsAppReplyPlan } from "@/lib/ai/generate-whatsapp-reply";
+import { summarizeAiError } from "@/lib/ai/error-summary";
 import { hasAiGatewayCredential } from "@/lib/ai/gateway-auth";
 import { proHealthAgentMode } from "@/lib/ai/prohealth-agent-mode";
 import { generateProHealthAgentReplyPlan } from "@/lib/ai/prohealth-whatsapp-agent";
+import { generateReplyWithFallback } from "@/lib/ai/resilient-reply-generator";
 import { interpretSemanticTurn } from "@/lib/ai/semantic-turn-interpreter";
 import { planSemanticTurn } from "@/lib/ai/semantic-turn-planner";
 import { NeonConversationRepository } from "@/lib/conversations/neon-repository";
@@ -135,9 +137,21 @@ export const POST = handleCallback<WhatsAppTurnQueueMessage>(async (message, met
   try {
     const nextfitApiKey = process.env.NEXTFIT_API_KEY;
     const agentActive = proHealthAgentMode() === "active";
+    const generateReply = agentActive
+      ? (input: Parameters<typeof generateProHealthAgentReplyPlan>[0]) => generateReplyWithFallback({
+        input,
+        primary: generateProHealthAgentReplyPlan,
+        fallback: generateWhatsAppReplyPlan,
+        onPrimaryFailure: (error) => {
+          console.warn("ProHealth agent generation failed; using conversational fallback", {
+            error: summarizeAiError(error),
+          });
+        },
+      })
+      : generateWhatsAppReplyPlan;
     const result = requireSettledQueueTurn(await processConversationTurn({ conversationId: message.conversationId,
       observedRevision: message.observedRevision, repository, provider,
-      generateReply: agentActive ? generateProHealthAgentReplyPlan : generateWhatsAppReplyPlan,
+      generateReply,
       ...(agentActive ? {
         agentOwnsConversation: true,
         journeyMode: "off" as const,

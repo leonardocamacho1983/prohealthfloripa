@@ -7,7 +7,7 @@ import styles from "./handoff.module.css";
 
 const errorMessageFor = (status: number) => {
   if (status === 401 || status === 403) return "Sua sessão não permite esta ação. Atualize a página.";
-  if (status === 409) return "A conversa mudou. Atualize a página e tente novamente.";
+  if (status === 409) return "A conversa mudou e foi atualizada automaticamente. Confira o novo estado.";
   if (status === 503) return "Serviço indisponível no momento. Tente novamente em instantes.";
   if (status >= 500) return "O sistema não conseguiu concluir a ação. Tente novamente em instantes.";
   return "Não foi possível concluir a ação. Tente novamente.";
@@ -34,6 +34,7 @@ export function AsyncActionForm({ action, buttonClassName, confirmMessage, hidde
     try {
       const response = await fetch(action, { method: "POST", body: new FormData(event.currentTarget) });
       if (!response.ok) {
+        if (response.status === 409) router.refresh();
         setError(errorMessageFor(response.status));
         return;
       }

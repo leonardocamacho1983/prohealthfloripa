@@ -26,7 +26,8 @@ export function TransferHandoffForm({ conversationId, assignmentVersion, candida
     try {
       const response = await fetch(`/api/handoff/${conversationId}/transfer`, { method: "POST", body: data });
       if (!response.ok) {
-        setError(response.status === 409 ? "A conversa mudou. Atualize e confira o responsável."
+        if (response.status === 409) router.refresh();
+        setError(response.status === 409 ? "A conversa mudou e foi atualizada automaticamente. Confira o responsável."
           : "Não foi possível transferir. Revise os campos e tente novamente.");
         return;
       }
