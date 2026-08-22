@@ -217,7 +217,7 @@ test("a duplicated AI bubble is sent only once", async () => {
   });
 
   assert.equal(result, "replied");
-  assert.deepEqual(provider.sent, [repeated]);
+  assert.deepEqual(provider.sent, ["A Massagem Relaxante dura uma hora e custa R$ 270. Você quer incluir a banheira?"]);
 });
 
 test("two distinct AI bubbles remain separate", async () => {
@@ -238,7 +238,7 @@ test("two distinct AI bubbles remain separate", async () => {
   });
 
   assert.equal(result, "replied");
-  assert.deepEqual(provider.sent, ["A Relaxante dura uma hora.", "O valor avulso é R$ 270."]);
+  assert.deepEqual(provider.sent, ["A Massagem Relaxante dura uma hora.", "O valor avulso é R$ 270."]);
 });
 
 class TurnProvider implements WhatsAppProvider {
@@ -330,7 +330,7 @@ test("a stalled typing indicator never delays generation or the customer reply",
     repository, provider, generateReply: reply("A Relaxante custa R$ 270.") });
 
   assert.equal(result, "replied");
-  assert.deepEqual(sent, ["A Relaxante custa R$ 270."]);
+  assert.deepEqual(sent, ["A Massagem Relaxante custa R$ 270."]);
   assert.equal(typingSignal?.aborted, true);
 });
 
@@ -527,7 +527,7 @@ test("corrections remain ordered in the consolidated turn", async () => {
   await processConversationTurn({ conversationId: "conversation", observedRevision: 3, repository, provider,
     generateReply: async (input) => { consolidated = input.message; return reply("Lomi-Lomi custa R$ 270.")(input); } });
   assert.match(consolidated, /Thai[\s\S]*Na verdade Lomi-Lomi[\s\S]*Quanto custa/);
-  assert.deepEqual(provider.sent, ["Lomi-Lomi custa R$ 270."]);
+  assert.deepEqual(provider.sent, ["Massagem Lomi-Lomi custa R$ 270."]);
 });
 
 test("active human ownership keeps the agent silent", async () => {
@@ -962,12 +962,12 @@ test("a cervical conversation progresses from complaint to concrete choice witho
 
   repository.addInbound("quero sim");
   assert.equal(await run(), "replied");
-  assert.match(provider.sent.at(-1) ?? "", /Você prefere a Miofascial/);
+  assert.match(provider.sent.at(-1) ?? "", /Você prefere a Massagem Miofascial/);
   assert.equal((provider.sent.at(-1)?.match(/\?/g) ?? []).length, 1);
 
   repository.addInbound("a mais direcionada");
   assert.equal(await run(), "replied");
-  assert.match(provider.sent.at(-1) ?? "", /Podemos seguir com a Miofascial/);
+  assert.match(provider.sent.at(-1) ?? "", /Podemos seguir com a Massagem Miofascial/);
 
   repository.addInbound("Como seria a liberação?");
   assert.equal(await run(), "replied");

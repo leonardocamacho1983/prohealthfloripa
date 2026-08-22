@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { composeDeterministicReply } from "../ai/deterministic-reply-composer.ts";
 import { repairAssistedReplyMessages } from "../ai/assisted-reply-repair.ts";
+import { qualifyMassageServiceNames } from "../ai/massage-service-display.ts";
 import type { WhatsAppReplyPlan } from "../ai/generate-whatsapp-reply.ts";
 import { validateResponsePolicy } from "../ai/response-policy-validator.ts";
 import { shouldLoadNextfitCatalogContext } from "../catalog/nextfit-catalog.ts";
@@ -774,7 +775,7 @@ export async function processConversationTurn(input: {
       };
     }
     const preparedMessages = prepareReplyMessages(responsePlan.messages);
-    const messages = preparedMessages.messages;
+    const messages = preparedMessages.messages.map(qualifyMassageServiceNames);
     if (preparedMessages.duplicateCount > 0) {
       logProcessingEvent("info", {
         event: "Duplicate AI reply bubble dropped",
